@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_06rtq20" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="subProcess_InventorySystem" name="Advanced Inventory System" isExecutable="true">
+    <bpmn:startEvent id="Start_Inv" name="Inventory Check Initiated">
+      <bpmn:outgoing>Flow_Inv_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_ReserveStock" name="Allocate Stock in Warehouse">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="inventory-reservation" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Inv_1</bpmn:incoming>
+      <bpmn:incoming>Flow_Loop_Back</bpmn:incoming>
+      <bpmn:outgoing>Flow_Inv_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:exclusiveGateway id="Gateway_StockCheck" name="Stock Available?" default="Flow_Stock_Success">
+      <bpmn:incoming>Flow_Inv_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Stock_Success</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Stock_Missing</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:intermediateCatchEvent id="Event_RetryTimer" name="Wait 5 Minutes">
+      <bpmn:incoming>Flow_Stock_Missing</bpmn:incoming>
+      <bpmn:outgoing>Flow_Loop_Back</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDef_1">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT5M</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:intermediateCatchEvent id="Event_ManualAllocationMsg" name="Manual Allocation Event Received">
+      <bpmn:incoming>Flow_Timeout_Escalation</bpmn:incoming>
+      <bpmn:outgoing>Flow_Manual_Fixed</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MessageEventDefinition_1" messageRef="Message_ManualAllocation" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:endEvent id="End_Inv_Success" name="Stock Verified and Locked">
+      <bpmn:incoming>Flow_Stock_Success</bpmn:incoming>
+      <bpmn:incoming>Flow_Manual_Fixed</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:boundaryEvent id="Event_Inv_Timeout" name="Allocation SLA Timeout" attachedToRef="Task_ReserveStock">
+      <bpmn:outgoing>Flow_Timeout_Escalation</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDef_2">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT1H</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:sequenceFlow id="Flow_Inv_1" sourceRef="Start_Inv" targetRef="Task_ReserveStock" />
+    <bpmn:sequenceFlow id="Flow_Inv_2" sourceRef="Task_ReserveStock" targetRef="Gateway_StockCheck" />
+    <bpmn:sequenceFlow id="Flow_Stock_Success" name="Yes" sourceRef="Gateway_StockCheck" targetRef="End_Inv_Success" />
+    <bpmn:sequenceFlow id="Flow_Stock_Missing" name="No" sourceRef="Gateway_StockCheck" targetRef="Event_RetryTimer">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=stockStatus = "OUT_OF_STOCK"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_Loop_Back" sourceRef="Event_RetryTimer" targetRef="Task_ReserveStock" />
+    <bpmn:sequenceFlow id="Flow_Timeout_Escalation" sourceRef="Event_Inv_Timeout" targetRef="Event_ManualAllocationMsg" />
+    <bpmn:sequenceFlow id="Flow_Manual_Fixed" sourceRef="Event_ManualAllocationMsg" targetRef="End_Inv_Success" />
+  </bpmn:process>
+  <bpmn:message id="Message_ManualAllocation" name="msg_manual_allocation_received">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=orderId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Inv">
+    <bpmndi:BPMNPlane id="BPMNPlane_Inv" bpmnElement="subProcess_InventorySystem">
+      <bpmndi:BPMNShape id="Start_Inv_di" bpmnElement="Start_Inv">
+        <dc:Bounds x="182" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ReserveStock_di" bpmnElement="Task_ReserveStock">
+        <dc:Bounds x="270" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_StockCheck_di" bpmnElement="Gateway_StockCheck" isMarkerVisible="true">
+        <dc:Bounds x="425" y="135" width="50" height="50" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_RetryTimer_di" bpmnElement="Event_RetryTimer">
+        <dc:Bounds x="432" y="252" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_ManualAllocationMsg_di" bpmnElement="Event_ManualAllocationMsg">
+        <dc:Bounds x="432" y="362" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Inv_Success_di" bpmnElement="End_Inv_Success">
+        <dc:Bounds x="612" y="142" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="666" y="146" width="68" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_Inv_Timeout_di" bpmnElement="Event_Inv_Timeout">
+        <dc:Bounds x="322" y="182" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Inv_1_di" bpmnElement="Flow_Inv_1">
+        <di:waypoint x="218" y="160" />
+        <di:waypoint x="270" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Inv_2_di" bpmnElement="Flow_Inv_2">
+        <di:waypoint x="370" y="160" />
+        <di:waypoint x="425" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Stock_Success_di" bpmnElement="Flow_Stock_Success">
+        <di:waypoint x="475" y="160" />
+        <di:waypoint x="612" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Stock_Missing_di" bpmnElement="Flow_Stock_Missing">
+        <di:waypoint x="450" y="185" />
+        <di:waypoint x="450" y="252" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Loop_Back_di" bpmnElement="Flow_Loop_Back">
+        <di:waypoint x="432" y="270" />
+        <di:waypoint x="280" y="270" />
+        <di:waypoint x="280" y="200" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Timeout_Escalation_di" bpmnElement="Flow_Timeout_Escalation">
+        <di:waypoint x="340" y="218" />
+        <di:waypoint x="340" y="380" />
+        <di:waypoint x="432" y="380" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Manual_Fixed_di" bpmnElement="Flow_Manual_Fixed">
+        <di:waypoint x="468" y="380" />
+        <di:waypoint x="630" y="380" />
+        <di:waypoint x="630" y="178" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

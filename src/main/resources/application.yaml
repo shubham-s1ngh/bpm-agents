@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: bpm-ai
+  ai:
+    model:
+      chat: openai
+    openai:
+      api-key: ${OPENAI_API_KEY:not-needed}
+      base-url: ${GPT4ALL_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${GPT4ALL_MODEL:qwen2.5-coder:7b}
+          temperature: ${GPT4ALL_TEMPERATURE:0.0}
+          max-tokens: ${GPT4ALL_MAX_TOKENS:512}
+          tool-choice: auto
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      chat:
+        options:
+          model: ${OLLAMA_MODEL:qwen2.5-coder:7b}
+          temperature: ${OLLAMA_TEMPERATURE:0.0}
+          tool-choice: auto
+# ── Server port (avoids conflict with Camunda on 8080) ───────────────
+server:
+  port: 8081
+
+# ── Camunda 8.9 local run (c8run Windows) ────────────────────────────
+# io.camunda.client package = camunda-spring-boot-3-starter
+# mode: self-managed + auth.method: none = correct for local c8run (no auth)
+##for C8 config
+camunda:
+  client:
+    mode: self-managed
+    auth:
+      method: none
+    # Addresses must include the protocol (http/https)
+    grpc-address: http://localhost:26500
+    rest-address: http://localhost:8080
+    # To use gRPC as default (required for job streaming)
+    prefer-rest-over-grpc: false
+    # Advanced settings
+    request-timeout: PT60S
+    execution-threads: 10
+    worker:
+      threads: 10
+      defaults:
+        max-jobs-active: 10
+        timeout: PT1M
+        poll-interval: PT0.1S
+        stream-enabled: false
+
+
+app:
+  ai:
+    # Enables only the /api/chat/tools endpoint.
+    # /api/chat always sends plain chat requests without tools for broad provider compatibility.
+    tools-enabled: ${APP_AI_TOOLS_ENABLED:true}
+  camunda:
+    notification:
+      # Optional: BPMN process id used for notification flows.
+      process-id: ${APP_CAMUNDA_NOTIFICATION_PROCESS_ID:}
+      # Optional: service task id that sends notifications within that process.
+      service-task-id: ${APP_CAMUNDA_NOTIFICATION_SERVICE_TASK_ID:}
+

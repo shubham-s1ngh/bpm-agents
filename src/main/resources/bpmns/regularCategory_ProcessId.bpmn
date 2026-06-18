@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_16phhfq" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="regularCategory_ProcessId1" name="Regular Fulfillment Track" isExecutable="true">
+    <bpmn:startEvent id="Start_Reg_Track" name="Regular Track Started">
+      <bpmn:outgoing>Flow_Reg_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_StandardPack" name="Standard Warehouse Packing">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="warehouse-pack-standard" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Reg_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Reg_2</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="Event_DelayWarning" name="2 Day SLA Delay" cancelActivity="false" attachedToRef="Task_StandardPack">
+      <bpmn:outgoing>Flow_ToSlaAlert</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDef_Reg">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">P2D</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_TriggerSlaNotice" name="Emit Logistics Delay Notice">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="logistics-delay-notice" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToSlaAlert</bpmn:incoming>
+      <bpmn:outgoing>Flow_Alert_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_SlaAlert" name="Delay Flagged">
+      <bpmn:incoming>Flow_Alert_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:serviceTask id="Task_StandardShip" name="Dispatch Standard Ground Shipping">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="carrier-dispatch-standard" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Reg_2</bpmn:incoming>
+      <bpmn:outgoing>Flow_Reg_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Reg_Track" name="Regular Fulfillment Done">
+      <bpmn:incoming>Flow_Reg_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Reg_1" sourceRef="Start_Reg_Track" targetRef="Task_StandardPack" />
+    <bpmn:sequenceFlow id="Flow_Reg_2" sourceRef="Task_StandardPack" targetRef="Task_StandardShip" />
+    <bpmn:sequenceFlow id="Flow_Reg_End" sourceRef="Task_StandardShip" targetRef="End_Reg_Track" />
+    <bpmn:sequenceFlow id="Flow_ToSlaAlert" sourceRef="Event_DelayWarning" targetRef="Task_TriggerSlaNotice" />
+    <bpmn:sequenceFlow id="Flow_Alert_End" sourceRef="Task_TriggerSlaNotice" targetRef="End_SlaAlert" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Reg">
+    <bpmndi:BPMNPlane id="BPMNPlane_Reg" bpmnElement="regularCategory_ProcessId1">
+      <bpmndi:BPMNShape id="Start_Reg_Track_di" bpmnElement="Start_Reg_Track">
+        <dc:Bounds x="182" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_StandardPack_di" bpmnElement="Task_StandardPack">
+        <dc:Bounds x="270" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_TriggerSlaNotice_di" bpmnElement="Task_TriggerSlaNotice">
+        <dc:Bounds x="410" y="240" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_SlaAlert_di" bpmnElement="End_SlaAlert">
+        <dc:Bounds x="562" y="262" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_StandardShip_di" bpmnElement="Task_StandardShip">
+        <dc:Bounds x="450" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Reg_Track_di" bpmnElement="End_Reg_Track">
+        <dc:Bounds x="612" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_DelayWarning_di" bpmnElement="Event_DelayWarning">
+        <dc:Bounds x="322" y="182" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Reg_1_di" bpmnElement="Flow_Reg_1">
+        <di:waypoint x="218" y="160" />
+        <di:waypoint x="270" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Reg_2_di" bpmnElement="Flow_Reg_2">
+        <di:waypoint x="370" y="160" />
+        <di:waypoint x="450" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Reg_End_di" bpmnElement="Flow_Reg_End">
+        <di:waypoint x="550" y="160" />
+        <di:waypoint x="612" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToSlaAlert_di" bpmnElement="Flow_ToSlaAlert">
+        <di:waypoint x="340" y="218" />
+        <di:waypoint x="340" y="280" />
+        <di:waypoint x="410" y="280" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Alert_End_di" bpmnElement="Flow_Alert_End">
+        <di:waypoint x="510" y="280" />
+        <di:waypoint x="562" y="280" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

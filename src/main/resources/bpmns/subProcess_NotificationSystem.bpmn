@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_1te6dta" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="subProcess_NotificationSystem" name="Multi-Instance Notification System" isExecutable="true">
+    <bpmn:startEvent id="Start_Notif" name="Notification Dispatch Triggered">
+      <bpmn:outgoing>Flow_Notif_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_SendEmail" name="Send Item Dispatch Alert">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="send-confirmation-email" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Notif_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Notif_2</bpmn:outgoing>
+      <bpmn:multiInstanceLoopCharacteristics>
+        <bpmn:extensionElements>
+          <zeebe:loopCharacteristics inputCollection="=itemsList" inputElement="item" />
+        </bpmn:extensionElements>
+      </bpmn:multiInstanceLoopCharacteristics>
+    </bpmn:serviceTask>
+    <bpmn:sequenceFlow id="Flow_Notif_1" sourceRef="Start_Notif" targetRef="Task_SendEmail" />
+    <bpmn:endEvent id="End_Notif" name="All Alerts Dispatched">
+      <bpmn:incoming>Flow_Notif_2</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Notif_2" sourceRef="Task_SendEmail" targetRef="End_Notif" />
+  </bpmn:process>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Notif">
+    <bpmndi:BPMNPlane id="BPMNPlane_Notif" bpmnElement="subProcess_NotificationSystem">
+      <bpmndi:BPMNShape id="Task_SendEmail_di" bpmnElement="Task_SendEmail">
+        <dc:Bounds x="270" y="100" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Notif_di" bpmnElement="Start_Notif">
+        <dc:Bounds x="172" y="122" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="163" y="158" width="55" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Notif_di" bpmnElement="End_Notif">
+        <dc:Bounds x="472" y="122" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="462" y="158" width="56" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Notif_1_di" bpmnElement="Flow_Notif_1">
+        <di:waypoint x="208" y="140" />
+        <di:waypoint x="270" y="140" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Notif_2_di" bpmnElement="Flow_Notif_2">
+        <di:waypoint x="370" y="140" />
+        <di:waypoint x="472" y="140" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_06rtq20" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:collaboration id="Collaboration_1n7xsv8">
+    <bpmn:participant id="Participant_0of6eu9" name="premier category" processRef="handleOrderId" />
+  </bpmn:collaboration>
+  <bpmn:process id="handleOrderId" name="handle order" isExecutable="true">
+    <bpmn:startEvent id="StartEvent_1" name="start">
+      <bpmn:outgoing>Flow_13353nn</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:scriptTask id="Activity_1wvpf97" name="sanitize order payload">
+      <bpmn:extensionElements>
+        <zeebe:script expression="=if (orderId = null) then false else true" resultVariable="isValid" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_13353nn</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToInv</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:callActivity id="subProcess_InventoryService" name="inventory service">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="subProcess_InventorySystem" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToInv</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPay</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:callActivity id="CallActivity_Payment" name="payment service">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="subProcess_PaymentGateway" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToPay</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEval</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:scriptTask id="Activity_1did4oc" name="evaluate order category">
+      <bpmn:extensionElements>
+        <zeebe:script expression="=if(category = &#34;1&#34;) then &#34;premier&#34; else if (category = &#34;2&#34;) then &#34;advanced&#34; else &#34;regular&#34;" resultVariable="path" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToEval</bpmn:incoming>
+      <bpmn:outgoing>Flow_0ponopy</bpmn:outgoing>
+    </bpmn:scriptTask>
+    <bpmn:exclusiveGateway id="Gateway_1yzizen" name="decides category" default="Flow_0cg4nol">
+      <bpmn:incoming>Flow_0ponopy</bpmn:incoming>
+      <bpmn:outgoing>Flow_0urqg2x</bpmn:outgoing>
+      <bpmn:outgoing>Flow_0cg4nol</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:callActivity id="CallActivity_Advanced" name="advanced track">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="advanceCategory_processId" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_0urqg2x</bpmn:incoming>
+      <bpmn:outgoing>Flow_MergeAdv</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:exclusiveGateway id="Gateway_Merge" name="merge">
+      <bpmn:incoming>Flow_MergeReg</bpmn:incoming>
+      <bpmn:incoming>Flow_MergeAdv</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToNotif</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+    <bpmn:callActivity id="CallActivity_Notification" name="notification service">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="subProcess_NotificationSystem" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToNotif</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:callActivity>
+    <bpmn:endEvent id="Event_1trsf5h" name="end event">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:boundaryEvent id="Event_PaymentError_Trap" name="Payment Failure Trap" attachedToRef="CallActivity_Payment">
+      <bpmn:outgoing>Flow_ToRollback</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_Master" errorRef="Error_PaymentRejected" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Activity_InventoryRollback" name="Rollback Stock Inventory">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="inventory-rollback" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToRollback</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToAbortEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="Event_FulfillmentAborted" name="Fulfillment Aborted">
+      <bpmn:incoming>Flow_ToAbortEnd</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_13353nn" sourceRef="StartEvent_1" targetRef="Activity_1wvpf97" />
+    <bpmn:sequenceFlow id="Flow_ToInv" sourceRef="Activity_1wvpf97" targetRef="subProcess_InventoryService" />
+    <bpmn:sequenceFlow id="Flow_ToPay" sourceRef="subProcess_InventoryService" targetRef="CallActivity_Payment" />
+    <bpmn:sequenceFlow id="Flow_ToEval" sourceRef="CallActivity_Payment" targetRef="Activity_1did4oc" />
+    <bpmn:sequenceFlow id="Flow_0ponopy" sourceRef="Activity_1did4oc" targetRef="Gateway_1yzizen" />
+    <bpmn:sequenceFlow id="Flow_0urqg2x" name="advanced" sourceRef="Gateway_1yzizen" targetRef="CallActivity_Advanced">
+      <bpmn:conditionExpression xsi:type="bpmn:tFormalExpression">=path = "advanced"</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+    <bpmn:sequenceFlow id="Flow_0cg4nol" name="regular" sourceRef="Gateway_1yzizen" targetRef="CallActivity_Regular" />
+    <bpmn:sequenceFlow id="Flow_MergeReg" sourceRef="CallActivity_Regular" targetRef="Gateway_Merge" />
+    <bpmn:sequenceFlow id="Flow_MergeAdv" sourceRef="CallActivity_Advanced" targetRef="Gateway_Merge" />
+    <bpmn:sequenceFlow id="Flow_ToNotif" sourceRef="Gateway_Merge" targetRef="CallActivity_Notification" />
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="CallActivity_Notification" targetRef="Event_1trsf5h" />
+    <bpmn:sequenceFlow id="Flow_ToRollback" sourceRef="Event_PaymentError_Trap" targetRef="Activity_InventoryRollback" />
+    <bpmn:sequenceFlow id="Flow_ToAbortEnd" sourceRef="Activity_InventoryRollback" targetRef="Event_FulfillmentAborted" />
+    <bpmn:callActivity id="CallActivity_Regular" name="regular track">
+      <bpmn:extensionElements>
+        <zeebe:calledElement processId="regularCategory_ProcessId1" propagateAllChildVariables="true" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_0cg4nol</bpmn:incoming>
+      <bpmn:outgoing>Flow_MergeReg</bpmn:outgoing>
+    </bpmn:callActivity>
+  </bpmn:process>
+  <bpmn:error id="Error_PaymentRejected" errorCode="PAYMENT_REJECTED" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_1">
+    <bpmndi:BPMNPlane id="BPMNPlane_1" bpmnElement="Collaboration_1n7xsv8">
+      <bpmndi:BPMNShape id="Participant_0of6eu9_di" bpmnElement="Participant_0of6eu9" isHorizontal="true">
+        <dc:Bounds x="130" y="80" width="1380" height="570" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
+        <dc:Bounds x="182" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_0zhjhn4_di" bpmnElement="Activity_1wvpf97">
+        <dc:Bounds x="270" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_0bf1sv9_di" bpmnElement="subProcess_InventoryService">
+        <dc:Bounds x="400" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_1nd7poq_di" bpmnElement="CallActivity_Payment">
+        <dc:Bounds x="530" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_1acxg0d_di" bpmnElement="Activity_1did4oc">
+        <dc:Bounds x="660" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_1yzizen_di" bpmnElement="Gateway_1yzizen" isMarkerVisible="true">
+        <dc:Bounds x="795" y="135" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="778" y="185" width="84" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_1roammb_di" bpmnElement="CallActivity_Advanced">
+        <dc:Bounds x="910" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_15gjcvj_di" bpmnElement="CallActivity_Regular">
+        <dc:Bounds x="900" y="340" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Merge_di" bpmnElement="Gateway_Merge" isMarkerVisible="true">
+        <dc:Bounds x="1065" y="135" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="1074" y="185" width="32" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_006xqt5_di" bpmnElement="CallActivity_Notification">
+        <dc:Bounds x="1170" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_1trsf5h_di" bpmnElement="Event_1trsf5h">
+        <dc:Bounds x="1332" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_InventoryRollback_di" bpmnElement="Activity_InventoryRollback">
+        <dc:Bounds x="530" y="270" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_FulfillmentAborted_di" bpmnElement="Event_FulfillmentAborted">
+        <dc:Bounds x="562" y="402" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_PaymentError_Trap_di" bpmnElement="Event_PaymentError_Trap">
+        <dc:Bounds x="582" y="182" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_13353nn_di" bpmnElement="Flow_13353nn">
+        <di:waypoint x="218" y="160" />
+        <di:waypoint x="270" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToInv_di" bpmnElement="Flow_ToInv">
+        <di:waypoint x="370" y="160" />
+        <di:waypoint x="400" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPay_di" bpmnElement="Flow_ToPay">
+        <di:waypoint x="500" y="160" />
+        <di:waypoint x="530" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEval_di" bpmnElement="Flow_ToEval">
+        <di:waypoint x="630" y="160" />
+        <di:waypoint x="660" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0ponopy_di" bpmnElement="Flow_0ponopy">
+        <di:waypoint x="760" y="160" />
+        <di:waypoint x="795" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0urqg2x_di" bpmnElement="Flow_0urqg2x">
+        <di:waypoint x="845" y="160" />
+        <di:waypoint x="910" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_0cg4nol_di" bpmnElement="Flow_0cg4nol">
+        <di:waypoint x="820" y="185" />
+        <di:waypoint x="820" y="380" />
+        <di:waypoint x="900" y="380" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="818" y="273" width="35" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_MergeReg_di" bpmnElement="Flow_MergeReg">
+        <di:waypoint x="1000" y="380" />
+        <di:waypoint x="1090" y="380" />
+        <di:waypoint x="1090" y="185" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_MergeAdv_di" bpmnElement="Flow_MergeAdv">
+        <di:waypoint x="1010" y="160" />
+        <di:waypoint x="1065" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToNotif_di" bpmnElement="Flow_ToNotif">
+        <di:waypoint x="1115" y="160" />
+        <di:waypoint x="1170" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToEnd_di" bpmnElement="Flow_ToEnd">
+        <di:waypoint x="1270" y="160" />
+        <di:waypoint x="1332" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToRollback_di" bpmnElement="Flow_ToRollback">
+        <di:waypoint x="600" y="218" />
+        <di:waypoint x="600" y="270" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToAbortEnd_di" bpmnElement="Flow_ToAbortEnd">
+        <di:waypoint x="580" y="350" />
+        <di:waypoint x="580" y="402" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

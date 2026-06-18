@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_1nnhkdp" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="subProcess_PaymentGateway" name="Payment Transaction System" isExecutable="true">
+    <bpmn:startEvent id="Start_Pay" name="Payment Capture Initiated">
+      <bpmn:outgoing>Flow_Pay_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:serviceTask id="Task_ChargeCard" name="Charge Customer Gateway Account">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="payment-charge" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Pay_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_Pay_Success</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:boundaryEvent id="Event_Payment_Error" name="Network or Decline Trap" attachedToRef="Task_ChargeCard">
+      <bpmn:outgoing>Flow_Trap_Error</bpmn:outgoing>
+      <bpmn:errorEventDefinition id="ErrorEventDef_1" errorRef="Error_GatewayFault" />
+    </bpmn:boundaryEvent>
+    <bpmn:serviceTask id="Task_RetryCharge" name="Re-try Payment Capture">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="payment-charge" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_00gklr8</bpmn:incoming>
+      <bpmn:outgoing>Flow_Retry_Success</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Pay_Success" name="Payment Collected Successfully">
+      <bpmn:incoming>Flow_Pay_Success</bpmn:incoming>
+      <bpmn:incoming>Flow_Retry_Success</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Pay_1" sourceRef="Start_Pay" targetRef="Task_ChargeCard" />
+    <bpmn:sequenceFlow id="Flow_Pay_Success" sourceRef="Task_ChargeCard" targetRef="End_Pay_Success" />
+    <bpmn:sequenceFlow id="Flow_Trap_Error" sourceRef="Event_Payment_Error" targetRef="Activity_1gby1bp" />
+    <bpmn:sequenceFlow id="Flow_Retry_Success" sourceRef="Task_RetryCharge" targetRef="End_Pay_Success" />
+    <bpmn:sequenceFlow id="Flow_Trigger_Rollback" sourceRef="Event_SLA_Breach" targetRef="End_Pay_BPMN_Error" />
+    <bpmn:intermediateCatchEvent id="Event_SLA_Breach" name="Customer Response Timeout">
+      <bpmn:outgoing>Flow_Trigger_Rollback</bpmn:outgoing>
+      <bpmn:timerEventDefinition id="TimerEventDefinition_01ckpm6">
+        <bpmn:timeDuration xsi:type="bpmn:tFormalExpression">PT30M</bpmn:timeDuration>
+      </bpmn:timerEventDefinition>
+    </bpmn:intermediateCatchEvent>
+    <bpmn:receiveTask id="Activity_1gby1bp" name="Payment Correction Update Received" messageRef="Message_PaymentCorrection">
+      <bpmn:incoming>Flow_Trap_Error</bpmn:incoming>
+      <bpmn:outgoing>Flow_00gklr8</bpmn:outgoing>
+    </bpmn:receiveTask>
+    <bpmn:sequenceFlow id="Flow_00gklr8" sourceRef="Activity_1gby1bp" targetRef="Task_RetryCharge" />
+    <bpmn:endEvent id="End_Pay_BPMN_Error" name="Escalate Master Cancelation">
+      <bpmn:incoming>Flow_Trigger_Rollback</bpmn:incoming>
+      <bpmn:errorEventDefinition id="ErrorEventDefinition_06j8mvq" errorRef="Error_1dcfibk" />
+    </bpmn:endEvent>
+  </bpmn:process>
+  <bpmn:message id="Message_PaymentCorrection" name="msg_payment_correction_received">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=orderId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmn:error id="Error_GatewayFault" errorCode="GATEWAY_DECLINE" />
+  <bpmn:error id="Error_MasterAbort" errorCode="PAYMENT_REJECTED" />
+  <bpmn:escalation id="Escalation_1uekm1t" name="End_Pay_BPMN_Error" escalationCode="End_Pay_BPMN_Error" />
+  <bpmn:error id="Error_1dcfibk" name="End_Pay_BPMN_Error" errorCode="PAYMENT_REJECTED" />
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Pay">
+    <bpmndi:BPMNPlane id="BPMNPlane_Pay" bpmnElement="subProcess_PaymentGateway">
+      <bpmndi:BPMNShape id="Start_Pay_di" bpmnElement="Start_Pay">
+        <dc:Bounds x="182" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_ChargeCard_di" bpmnElement="Task_ChargeCard">
+        <dc:Bounds x="270" y="120" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_RetryCharge_di" bpmnElement="Task_RetryCharge">
+        <dc:Bounds x="590" y="220" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Pay_Success_di" bpmnElement="End_Pay_Success">
+        <dc:Bounds x="752" y="142" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_19n5coj_di" bpmnElement="Activity_1gby1bp">
+        <dc:Bounds x="410" y="220" width="100" height="80" />
+        <bpmndi:BPMNLabel />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_1euw12w_di" bpmnElement="Event_SLA_Breach">
+        <dc:Bounds x="442" y="292" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="475" y="320" width="50" height="40" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_0977zbq_di" bpmnElement="End_Pay_BPMN_Error">
+        <dc:Bounds x="752" y="362" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="731" y="398" width="79" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Event_Payment_Error_di" bpmnElement="Event_Payment_Error">
+        <dc:Bounds x="322" y="182" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Pay_1_di" bpmnElement="Flow_Pay_1">
+        <di:waypoint x="218" y="160" />
+        <di:waypoint x="270" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Pay_Success_di" bpmnElement="Flow_Pay_Success">
+        <di:waypoint x="370" y="160" />
+        <di:waypoint x="752" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Trap_Error_di" bpmnElement="Flow_Trap_Error">
+        <di:waypoint x="340" y="218" />
+        <di:waypoint x="340" y="260" />
+        <di:waypoint x="410" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Retry_Success_di" bpmnElement="Flow_Retry_Success">
+        <di:waypoint x="690" y="260" />
+        <di:waypoint x="716" y="260" />
+        <di:waypoint x="716" y="160" />
+        <di:waypoint x="752" y="160" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Trigger_Rollback_di" bpmnElement="Flow_Trigger_Rollback">
+        <di:waypoint x="460" y="328" />
+        <di:waypoint x="460" y="380" />
+        <di:waypoint x="752" y="380" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_00gklr8_di" bpmnElement="Flow_00gklr8">
+        <di:waypoint x="510" y="260" />
+        <di:waypoint x="590" y="260" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" xmlns:zeebe="http://camunda.org/schema/zeebe/1.0" xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:modeler="http://camunda.org/schema/modeler/1.0" id="Definitions_05rg1v5" targetNamespace="http://bpmn.io/schema/bpmn" exporter="Camunda Modeler" exporterVersion="5.47.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.9.0">
+  <bpmn:process id="advanceCategory_processId" name="Advanced Fulfillment Track" isExecutable="true">
+    <bpmn:startEvent id="Start_Adv_Track" name="Advanced Track Started">
+      <bpmn:outgoing>Flow_Adv_1</bpmn:outgoing>
+    </bpmn:startEvent>
+    <bpmn:parallelGateway id="Gateway_Fork" name="Split Processing">
+      <bpmn:incoming>Flow_Adv_1</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToPrep</bpmn:outgoing>
+      <bpmn:outgoing>Flow_ToApprovalMsg</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_PrepFulfillment" name="Prepare High-Priority Items">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="warehouse-prep-priority" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToPrep</bpmn:incoming>
+      <bpmn:outgoing>Flow_Merge_Prep</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:intermediateCatchEvent id="Event_PriorityApprovalMsg" name="Priority Approval Received">
+      <bpmn:incoming>Flow_ToApprovalMsg</bpmn:incoming>
+      <bpmn:outgoing>Flow_Merge_App</bpmn:outgoing>
+      <bpmn:messageEventDefinition id="MsgEventDef_Adv" messageRef="Message_PriorityApproval" />
+    </bpmn:intermediateCatchEvent>
+    <bpmn:parallelGateway id="Gateway_Join" name="Synchronize Sync">
+      <bpmn:incoming>Flow_Merge_Prep</bpmn:incoming>
+      <bpmn:incoming>Flow_Merge_App</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToShip</bpmn:outgoing>
+    </bpmn:parallelGateway>
+    <bpmn:serviceTask id="Task_PriorityShip" name="Dispatch Expedited Shipment">
+      <bpmn:extensionElements>
+        <zeebe:taskDefinition type="carrier-dispatch-priority" />
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToShip</bpmn:incoming>
+      <bpmn:outgoing>Flow_Adv_End</bpmn:outgoing>
+    </bpmn:serviceTask>
+    <bpmn:endEvent id="End_Adv_Track" name="Advanced Fulfillment Done">
+      <bpmn:incoming>Flow_Adv_End</bpmn:incoming>
+    </bpmn:endEvent>
+    <bpmn:sequenceFlow id="Flow_Adv_1" sourceRef="Start_Adv_Track" targetRef="Gateway_Fork" />
+    <bpmn:sequenceFlow id="Flow_ToPrep" sourceRef="Gateway_Fork" targetRef="Task_PrepFulfillment" />
+    <bpmn:sequenceFlow id="Flow_ToApprovalMsg" sourceRef="Gateway_Fork" targetRef="Event_PriorityApprovalMsg" />
+    <bpmn:sequenceFlow id="Flow_Merge_Prep" sourceRef="Task_PrepFulfillment" targetRef="Gateway_Join" />
+    <bpmn:sequenceFlow id="Flow_Merge_App" sourceRef="Event_PriorityApprovalMsg" targetRef="Gateway_Join" />
+    <bpmn:sequenceFlow id="Flow_ToShip" sourceRef="Gateway_Join" targetRef="Task_PriorityShip" />
+    <bpmn:sequenceFlow id="Flow_Adv_End" sourceRef="Task_PriorityShip" targetRef="End_Adv_Track" />
+  </bpmn:process>
+  <bpmn:message id="Message_PriorityApproval" name="msg_priority_approval_received">
+    <bpmn:extensionElements>
+      <zeebe:subscription correlationKey="=orderId" />
+    </bpmn:extensionElements>
+  </bpmn:message>
+  <bpmndi:BPMNDiagram id="BPMNDiagram_Adv">
+    <bpmndi:BPMNPlane id="BPMNPlane_Adv" bpmnElement="advanceCategory_processId">
+      <bpmndi:BPMNShape id="Event_PriorityApprovalMsg_di" bpmnElement="Event_PriorityApprovalMsg">
+        <dc:Bounds x="412" y="242" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="390" y="278" width="81" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_PrepFulfillment_di" bpmnElement="Task_PrepFulfillment">
+        <dc:Bounds x="380" y="50" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Join_di" bpmnElement="Gateway_Join" isMarkerVisible="true">
+        <dc:Bounds x="545" y="145" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="535" y="113" width="89" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Task_PriorityShip_di" bpmnElement="Task_PriorityShip">
+        <dc:Bounds x="650" y="130" width="100" height="80" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="End_Adv_Track_di" bpmnElement="End_Adv_Track">
+        <dc:Bounds x="822" y="152" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="800" y="188" width="80" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Gateway_Fork_di" bpmnElement="Gateway_Fork" isMarkerVisible="true">
+        <dc:Bounds x="275" y="145" width="50" height="50" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="335" y="163" width="79" height="14" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Start_Adv_Track_di" bpmnElement="Start_Adv_Track">
+        <dc:Bounds x="162" y="152" width="36" height="36" />
+        <bpmndi:BPMNLabel>
+          <dc:Bounds x="140" y="188" width="80" height="27" />
+        </bpmndi:BPMNLabel>
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNEdge id="Flow_Adv_1_di" bpmnElement="Flow_Adv_1">
+        <di:waypoint x="198" y="170" />
+        <di:waypoint x="275" y="170" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToPrep_di" bpmnElement="Flow_ToPrep">
+        <di:waypoint x="300" y="145" />
+        <di:waypoint x="300" y="90" />
+        <di:waypoint x="380" y="90" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToApprovalMsg_di" bpmnElement="Flow_ToApprovalMsg">
+        <di:waypoint x="300" y="195" />
+        <di:waypoint x="300" y="260" />
+        <di:waypoint x="412" y="260" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Merge_Prep_di" bpmnElement="Flow_Merge_Prep">
+        <di:waypoint x="480" y="90" />
+        <di:waypoint x="570" y="90" />
+        <di:waypoint x="570" y="145" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Merge_App_di" bpmnElement="Flow_Merge_App">
+        <di:waypoint x="448" y="260" />
+        <di:waypoint x="570" y="260" />
+        <di:waypoint x="570" y="195" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_ToShip_di" bpmnElement="Flow_ToShip">
+        <di:waypoint x="595" y="170" />
+        <di:waypoint x="650" y="170" />
+      </bpmndi:BPMNEdge>
+      <bpmndi:BPMNEdge id="Flow_Adv_End_di" bpmnElement="Flow_Adv_End">
+        <di:waypoint x="750" y="170" />
+        <di:waypoint x="822" y="170" />
+      </bpmndi:BPMNEdge>
+    </bpmndi:BPMNPlane>
+  </bpmndi:BPMNDiagram>
+</bpmn:definitions>
