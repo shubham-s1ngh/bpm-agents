@@ -64,8 +64,11 @@ Core components:
   - workflow extension contract
 
 Detailed architecture:
-- `docs/camunda-chat-agent-architecture.md`
-- `docs/camunda-agent-context-framework.md`
+- [camunda-chat-agent-architecture.md](docs/camunda-chat-agent-architecture.md)
+- [camunda-agent-context-framework.md](docs/camunda-agent-context-framework.md)
+
+Visual architecture diagrams:
+- [Visual architecture](docs/camunda-chat-agent-architecture.md#visual-architecture)
 
 ## Current Workflow Strategy
 
@@ -124,6 +127,16 @@ Run focused tests:
 mvn -q "-Dtest=CamundaDiagnosticToolsTest,CamundaEvidenceDigestServiceTest,CamundaDiagnosticReportServiceTest" test
 ```
 
+## GitHub Gate
+
+This repository includes a free-plan GitHub Actions guard at `.github/workflows/direct-push-gate.yml`.
+
+- `pull_request` into `main` is allowed and recorded as the expected path.
+- `push` to `main` is checked against the GitHub API.
+- if the pushed commit is not associated with a merged pull request targeting `main`, the workflow fails and flags the update as a direct push.
+
+This is an audit gate, not a native branch lock. On free private repositories, it can fail and surface direct pushes after they happen, but it cannot prevent the push by itself.
+
 ## API Shape
 
 Current primary chat endpoint:
@@ -151,15 +164,15 @@ Typical prompt examples:
 ## Documentation
 
 - Architecture:
-  - `docs/camunda-chat-agent-architecture.md`
+  - [camunda-chat-agent-architecture.md](docs/camunda-chat-agent-architecture.md)
 - Context framework:
-  - `docs/camunda-agent-context-framework.md`
+  - [camunda-agent-context-framework.md](docs/camunda-agent-context-framework.md)
 - Strategy extension plan:
-  - `docs/plans/strategy-driven-incident-resolution-plan.md`
+  - [strategy-driven-incident-resolution-plan.md](docs/plans/strategy-driven-incident-resolution-plan.md)
 - Release notes:
-  - `docs/releases/release-notes-0.1.0.md`
+  - [release-notes-0.1.0.md](docs/releases/release-notes-0.1.0.md)
 - Agent implementation guide:
-  - `AGENTS.md`
+  - [AGENTS.md](AGENTS.md)
 
 ## Next Direction
 
@@ -172,4 +185,4 @@ The next major framework step is to move incident-resolution policy fully into w
 
 That plan is documented in:
 
-- `docs/plans/strategy-driven-incident-resolution-plan.md`
+- [strategy-driven-incident-resolution-plan.md](docs/plans/strategy-driven-incident-resolution-plan.md)

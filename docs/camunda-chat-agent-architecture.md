@@ -12,6 +12,146 @@ This module implements a local diagnostic agent for Camunda 8 workflows. The age
 - Interface Segregation: evidence extraction, tool dispatch, orchestration, reporting, and validation are split so callers depend only on what they use.
 - Dependency Inversion: the controller depends on an application service, and orchestration depends on injected collaborators rather than embedding implementation logic.
 
+## Visual Architecture
+
+```mermaid
+flowchart LR
+    user[User or Operator]
+    http["POST /api/llama/chat"]
+
+    subgraph web["Web Layer"]
+        controller["LlamaToolsTestController"]
+    end
+
+    subgraph orchestration["Application / Orchestration Layer"]
+        chatService["CamundaAgentChatService"]
+        registry["WorkflowStrategyRegistry"]
+        strategy["WorkflowContextStrategy\nOrderWorkflowStrategy"]
+    end
+
+    subgraph tooling["Tool Execution Layer"]
+        dispatch["CamundaToolDispatchService"]
+        tools["CamundaDiagnosticTools"]
+        camundaClient["CamundaOrchestrationClient"]
+    end
+
+    subgraph evidence["Evidence + Reporting Layer"]
+        digest["CamundaEvidenceDigestService"]
+        report["CamundaDiagnosticReportService"]
+        validator["CamundaReportGroundingValidator"]
+        snapshot["CamundaEvidenceSnapshot\nCamundaInstanceEvidence"]
+    end
+
+    subgraph external["External Systems"]
+        llm["Execution / Report LLM clients"]
+        camunda["Camunda 8 REST API"]
+    end
+
+    user --> http --> controller --> chatService
+    chatService --> registry --> strategy
+    chatService --> llm
+    chatService --> dispatch --> tools --> camundaClient --> camunda
+    tools --> chatService
+    chatService --> digest --> snapshot
+    snapshot --> report
+    report --> llm
+    report --> validator
+    validator --> report
+    report --> controller
+    controller --> user
+
+    classDef webFill fill:#f3f0ff,stroke:#4c1d95,stroke-width:1px,color:#111827;
+    classDef orchestrationFill fill:#e0f2fe,stroke:#075985,stroke-width:1px,color:#111827;
+    classDef toolFill fill:#dcfce7,stroke:#166534,stroke-width:1px,color:#111827;
+    classDef evidenceFill fill:#fef3c7,stroke:#92400e,stroke-width:1px,color:#111827;
+    classDef externalFill fill:#fee2e2,stroke:#991b1b,stroke-width:1px,color:#111827;
+
+    class controller webFill;
+    class chatService,registry,strategy orchestrationFill;
+    class dispatch,tools,camundaClient toolFill;
+    class digest,report,validator,snapshot evidenceFill;
+    class llm,camunda externalFill;
+```
+
+### Operator Journey View
+
+This journey view explains the same architecture from the operator's perspective. It is useful when the audience cares more about the user experience and trust model than about container boundaries.
+
+```mermaid
+journey
+    title Operator Journey Through bpm-ai Diagnostic And Retry Flow
+    section Ask
+      Submit order or incident question: 5: Operator
+      Request a retry only when operationally intended: 4: Operator
+    section Resolve
+      Match the request to the right workflow strategy: 5: bpm-ai
+      Decide whether this is diagnosis or mutation: 5: bpm-ai
+    section Verify
+      Query Camunda for live process state and incidents: 5: bpm-ai, Camunda 8
+      Confirm post-retry state instead of assuming success: 5: bpm-ai, Camunda 8
+    section Explain
+      Use the LLM to shape the response wording: 4: bpm-ai, LLM Runtime
+      Validate the final answer against deterministic evidence: 5: bpm-ai
+    section Respond
+      Return a grounded markdown response: 5: bpm-ai
+      Avoid invented IDs, statuses, and success claims: 5: bpm-ai
+```
+
+Journey highlights:
+
+- The operator starts with a natural-language question, not a low-level API command.
+- `bpm-ai` resolves workflow context before it tries to interpret runtime state.
+- Camunda remains the source of truth for diagnosis and retry verification.
+- The LLM helps present the answer, but the final response is still grounded and validated before it is returned.
+
+## Diagnostic And Retry Flow
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant C as LlamaToolsTestController
+    participant A as CamundaAgentChatService
+    participant R as WorkflowStrategyRegistry
+    participant D as CamundaToolDispatchService
+    participant T as CamundaDiagnosticTools
+    participant O as CamundaOrchestrationClient
+    participant E as CamundaEvidenceDigestService
+    participant P as CamundaDiagnosticReportService
+    participant V as CamundaReportGroundingValidator
+
+    U->>C: POST /api/llama/chat
+    C->>A: prompt
+    A->>R: resolve strategy
+    R-->>A: workflow strategy
+
+    alt direct processInstanceKey or incidentKey path
+        A->>T: diagnose or resolve
+        T->>O: Camunda REST calls
+        O-->>T: runtime evidence
+        T-->>A: diagnostic or mutation payload
+    else model-guided tool path
+        A->>D: parse and dispatch tool JSON
+        D->>T: allowed tool call
+        T->>O: Camunda REST calls
+        O-->>T: runtime evidence
+        T-->>D: tool result
+        D-->>A: serialized payload
+    end
+
+    A->>E: normalize payload
+    E-->>P: canonical evidence digest
+    P->>V: validate grounded markdown
+    alt grounding accepted
+        V-->>P: accepted
+    else grounding rejected
+        V-->>P: rejection reasons
+        P->>V: retry once or sanitize fallback
+    end
+    P-->>A: final markdown
+    A-->>C: response body
+    C-->>U: grounded diagnostic or retry report
+```
+
 ## Current Class Structure
 
 ### Web Layer
