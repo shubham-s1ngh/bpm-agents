@@ -1,0 +1,1 @@
+delete from INCIDENT_RESOLUTION_RULE;
