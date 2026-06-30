@@ -1,99 +1,110 @@
 # bpm-ai
 
-Camunda workflow agent framework for grounded operational diagnostics, consultant-managed retry policy, and controlled incident resolution.
+`bpm-ai` is a Spring Boot application that helps operators and consultants inspect Camunda 8 workflow instances, understand incidents, and apply controlled retry policy.
 
-## Current Status
+In plain terms, this project does three things:
 
-- Project version: `0.1.0`
-- Runtime stack:
-  - Spring Boot `3.5.15-SNAPSHOT`
-  - Java `21`
-  - Camunda `8.9.0`
-  - Spring AI
-  - Ollama-compatible chat and embedding models
-  - H2 + Flyway for consultant-managed rule storage
+1. It looks up a workflow instance from a natural-language prompt such as an `orderId`.
+2. It collects live runtime evidence from Camunda, including variables, active flow elements, incidents, and child subprocesses.
+3. It returns a grounded report, and when explicitly asked, it can attempt incident resolution using workflow-specific retry rules.
 
-## What This Release Includes
+## Who This Is For
 
-- workflow strategy resolution for `handleOrderId`
-- business identifier normalization for `orderId`
-- deep Camunda diagnostics with child-process traversal
-- strategy-driven incident retry policy for single-order and bulk-order retry flows
-- consultant-managed incident-resolution rule catalog
-- BPMN-assisted draft rule suggestions
-- vector-backed workflow knowledge retrieval for read-only report enrichment
-- deterministic incident-resolution reports after mutation
-- post-resolution verification polling and retry observability
+This project is useful for:
 
-## Design Constraints
+- developers working on Camunda-integrated workflows
+- operators investigating stuck or failed process instances
+- business consultants managing retry policy without changing Java code
 
-- Camunda APIs are the source of runtime truth.
+## What The Application Includes
+
+### Diagnostic agent
+
+- natural-language prompt handling
+- workflow strategy resolution
+- process-instance search by business identifier
+- deep runtime diagnostics
+- child-process traversal
+
+### Incident resolution
+
+- explicit retry intent detection
+- retry by incident key or process instance
+- post-resolution verification polling
+- workflow-specific allow/block/no-action policy
+
+### Consultant rule management
+
+- persisted incident-resolution rule catalog
+- BPMN upload and draft rule suggestions
+- browser-based rule editor
+
+### Reporting
+
+- grounded read-only diagnostic reports
+- deterministic post-retry reports
+- vector-backed workflow knowledge retrieval for better explanation
+
+## Current Release Scope
+
+Version: `0.1.0`
+
+Current first-class workflow strategy:
+
+- `handleOrderId`
+
+Current order workflow support includes:
+
+- `ORD-...` identifier extraction
+- category translation
+- subprocess-aware incident matching
+- transient `500` retry handling
+- blocking of deployment mismatch and payment `400` incidents
+
+## Runtime Stack
+
+- Spring Boot `3.5.15-SNAPSHOT`
+- Java `21`
+- Camunda `8.9.0`
+- Spring AI
+- Ollama-compatible chat model
+- Ollama-compatible embedding model
+- H2 + Flyway for consultant-managed rule persistence
+
+## How It Works
+
+### Read-only diagnosis flow
+
+1. The user sends a prompt such as `check for this order id ORD-55448`.
+2. The app resolves the matching workflow strategy.
+3. It searches Camunda using the workflow’s business identifier.
+4. It gathers process state, variables, incidents, flow elements, and child subprocess diagnostics.
+5. It builds a grounded report from that evidence.
+
+### Retry flow
+
+1. The user explicitly asks to retry an incident.
+2. The app diagnoses the active process instance first.
+3. The workflow strategy evaluates whether retry is allowed, blocked, or skipped.
+4. If allowed, the app sends the Camunda incident-resolution mutation.
+5. It verifies the result before reporting success.
+
+## Important Behavior
+
+- Camunda is the source of truth for runtime state.
+- The app should not invent instance keys, variables, incidents, or statuses.
 - Evidence normalization stays deterministic in Java.
-- Read-only diagnostic reports can use the LLM, but only against grounded evidence plus static workflow knowledge.
-- Incident-resolution reports are rendered deterministically from Camunda JSON so verified child-process and final-step evidence are not lost.
-- Mutation operations remain explicit and retry-intent-gated.
-
-## Main Capabilities
-
-### Diagnostics
-
-- process-instance search by workflow business identifier
-- variable inspection
-- active flow element inspection
-- child subprocess inspection
-- grounded markdown reports
-- root-instance and process-tree incident visibility
-
-### Incident Resolution
-
-- resolve by incident key
-- resolve by process instance
-- strategy-driven allow/block/no-action decisions
-- child-process incident resolution within the same process tree
-- verification checks after mutation before reporting success
-
-### Consultant Rule Management
-
-- persisted `incident_resolution_rule` catalog
-- CRUD admin API
-- consultant-facing rule editor UI
-- BPMN upload assistant for draft suggestions
-- rule changes reflected in workflow knowledge retrieval
-
-## Core Components
-
-- [LlamaToolsTestController](src/main/java/com/shubham/dev/bpm_agent/chat/LlamaToolsTestController.java)
-  - thin HTTP adapter for chat requests
-- [CamundaAgentChatService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaAgentChatService.java)
-  - main orchestration service
-- [CamundaDiagnosticTools](src/main/java/com/shubham/dev/bpm_agent/chat/CamundaDiagnosticTools.java)
-  - Camunda-backed diagnostic and mutation tool surface
-- [CamundaToolDispatchService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaToolDispatchService.java)
-  - tool extraction and dispatch
-- [CamundaEvidenceDigestService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaEvidenceDigestService.java)
-  - deterministic evidence normalization
-- [CamundaDiagnosticReportService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java)
-  - LLM-backed read-only reporting plus deterministic mutation reporting
-- [CamundaReportGroundingValidator](src/main/java/com/shubham/dev/bpm_agent/chat/validation/CamundaReportGroundingValidator.java)
-  - report grounding enforcement
-- [WorkflowContextStrategy](src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowContextStrategy.java)
-  - workflow extension contract
-- [OrderWorkflowStrategy](src/main/java/com/shubham/dev/bpm_agent/strategy/OrderWorkflowStrategy.java)
-  - current workflow strategy implementation
-- [WorkflowKnowledgeVectorStoreService](src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java)
-  - vector-backed workflow knowledge indexing and retrieval
-
-Detailed architecture:
-- [camunda-chat-agent-architecture.md](docs/camunda-chat-agent-architecture.md)
-- [camunda-agent-context-framework.md](docs/camunda-agent-context-framework.md)
+- Read-only reports can use the LLM for explanation, but only with grounded evidence.
+- Incident-resolution reports are rendered deterministically from Camunda JSON.
+- Mutation command acceptance is not treated as success unless verification confirms the outcome.
 
 ## Local URLs
 
-- Chat endpoint: `POST /api/llama/chat`
+- Main chat endpoint: `POST /api/llama/chat`
 - Consultant rule editor: `http://localhost:8081/admin/incident-rules/index.html`
 - H2 console: `http://localhost:8081/h2-console`
 
-## Run Locally
+## Quick Start
 
 ### Requirements
 
@@ -101,9 +112,9 @@ Detailed architecture:
 - Maven or Maven wrapper
 - local Camunda 8.9 environment
 - local Ollama-compatible runtime
-- embedding model available locally, default `nomic-embed-text`
+- local embedding model, default `nomic-embed-text`
 
-### Start the app
+### Start the application
 
 Windows:
 
@@ -117,7 +128,7 @@ Or:
 mvn spring-boot:run
 ```
 
-## Build and Test
+## Build And Test
 
 Compile:
 
@@ -141,21 +152,21 @@ mvn -q "-Dtest=CamundaDiagnosticToolsTest,CamundaEvidenceDigestServiceTest,Camun
 mvn -q "-Dtest=CamundaAgentChatServiceTest,IncidentResolutionRuleCatalogServiceTest,WorkflowKnowledgeVectorStoreServiceTest" test
 ```
 
-## API Shape
+## Example Requests
 
-Primary chat endpoint:
-
-- `POST /api/llama/chat`
-
-Example prompts:
+Read-only diagnosis:
 
 ```json
 { "prompt": "check for this order id ORD-55422" }
 ```
 
+Retry with incident resolution:
+
 ```json
 { "prompt": "check for this order id ORD-55422 and retry incident" }
 ```
+
+Bulk retry:
 
 ```json
 { "prompt": "retry incidents for ORD-55421 and ORD-55422" }
@@ -163,59 +174,53 @@ Example prompts:
 
 ## Configuration Notes
 
-Important local configuration lives in [application.yaml](src/main/resources/application.yaml):
+Most local behavior is controlled from [application.yaml](src/main/resources/application.yaml), including:
 
-- file-backed H2 datasource for rule persistence
+- Camunda connection settings
 - Ollama chat model configuration
 - Ollama embedding model configuration
-- vector retrieval toggle and top-K setting
-- Camunda incident verification polling
-- local mock service failure toggles
+- vector retrieval toggle and top-K value
+- incident verification polling
+- local mock service failure simulation
+- H2 datasource and Flyway migration setup
 
-## Important Behavior
+## Main Source Areas
 
-- The agent must not invent runtime state.
-- Root-process incident count and full process-tree incident count are not the same thing; reports distinguish them when child subprocesses hold the active incident.
-- Read-only diagnostics may use retrieved BPMN and rule context, but live status, incidents, variables, and keys must still come from Camunda.
-- Mutation command acceptance is not treated as success unless post-check verification confirms the outcome.
-- If the consultant-managed rule catalog is empty, `OrderWorkflowStrategy` falls back to in-code defaults.
-
-## Current Workflow Support
-
-Current first-class strategy:
-
-- `handleOrderId`
-
-Current order workflow support includes:
-
-- `ORD-...` identifier extraction
-- category translation
-- subprocess-aware incident rule matching
-- transient `500` retry handling
-- blocking of deployment mismatch and payment `400` incidents
+- [LlamaToolsTestController](src/main/java/com/shubham/dev/bpm_agent/chat/LlamaToolsTestController.java)
+  - HTTP entry point
+- [CamundaAgentChatService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaAgentChatService.java)
+  - session orchestration
+- [CamundaDiagnosticTools](src/main/java/com/shubham/dev/bpm_agent/chat/CamundaDiagnosticTools.java)
+  - Camunda-facing diagnostics and mutation tools
+- [CamundaDiagnosticReportService](src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java)
+  - final reporting
+- [OrderWorkflowStrategy](src/main/java/com/shubham/dev/bpm_agent/strategy/OrderWorkflowStrategy.java)
+  - current workflow-specific behavior
+- [WorkflowKnowledgeVectorStoreService](src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java)
+  - workflow knowledge indexing and retrieval
 
 ## Documentation
 
 - Architecture:
-  - [camunda-chat-agent-architecture.md](docs/camunda-chat-agent-architecture.md)
+  - [docs/camunda-chat-agent-architecture.md](docs/camunda-chat-agent-architecture.md)
 - Context framework:
-  - [camunda-agent-context-framework.md](docs/camunda-agent-context-framework.md)
+  - [docs/camunda-agent-context-framework.md](docs/camunda-agent-context-framework.md)
 - Release notes:
-  - [release-notes-0.1.0.md](docs/releases/release-notes-0.1.0.md)
+  - [docs/releases/release-notes-0.1.0.md](docs/releases/release-notes-0.1.0.md)
 - Strategy plan:
-  - [strategy-driven-incident-resolution-plan.md](docs/plans/strategy-driven-incident-resolution-plan.md)
+  - [docs/plans/strategy-driven-incident-resolution-plan.md](docs/plans/strategy-driven-incident-resolution-plan.md)
 - Agent implementation guide:
   - [AGENTS.md](AGENTS.md)
 
 ## Current Limits
 
 - `searchProcessInstances` still searches by variable and does not yet enforce workflow `processId` at the tool level.
-- bulk retry is currently order-workflow-specific, not generic across all workflows.
-- the consultant UI is intentionally minimal and served as a static page without a dedicated frontend build pipeline.
+- bulk retry is currently order-workflow-specific
+- the consultant UI is intentionally minimal and static
 
 ## Next Direction
 
-The next major step is to generalize the current order-specific retrieval and retry-policy model so new workflows can contribute:
+The next major step is to generalize the current design so additional workflows can contribute:
 
 - workflow-specific business identifier extraction
 - workflow-specific BPMN knowledge indexing

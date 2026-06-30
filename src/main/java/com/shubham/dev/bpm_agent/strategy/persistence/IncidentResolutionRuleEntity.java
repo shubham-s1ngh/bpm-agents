@@ -1,49 +1,67 @@
 package com.shubham.dev.bpm_agent.strategy.persistence;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
+
+import java.time.Instant;
 
 @Entity
-@Table(name = "incident_resolution_rule")
+@Table(name = "INCIDENT_RESOLUTION_RULE")
 public class IncidentResolutionRuleEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "ID")
     private Long id;
 
-    @Column(name = "workflow_process_definition_id", nullable = false)
+    @Column(name = "WORKFLOW_PROCESS_DEFINITION_ID", nullable = false)
     private String workflowProcessDefinitionId;
 
-    @Column(nullable = false)
-    private Integer priority;
+    @Column(name = "PRIORITY", nullable = false)
+    private Integer priority = 100;
 
-    @Column(nullable = false)
-    private boolean enabled;
+    @Column(name = "ENABLED", nullable = false)
+    private boolean enabled = true;
 
-    @Column(nullable = false, length = 1000)
+    @Column(name = "INSTRUCTION", nullable = false, length = 4000)
     private String instruction;
 
-    @Column(name = "error_types", length = 500)
+    @Column(name = "ERROR_TYPES", length = 1000)
     private String errorTypes;
 
-    @Column(name = "http_status_codes", length = 200)
+    @Column(name = "HTTP_STATUS_CODES", length = 1000)
     private String httpStatusCodes;
 
-    @Column(name = "message_contains", length = 1000)
+    @Column(name = "MESSAGE_CONTAINS", length = 2000)
     private String messageContains;
 
-    @Column(name = "resolution_mode", nullable = false, length = 50)
+    @Column(name = "RESOLUTION_MODE", nullable = false, length = 64)
     private String resolutionMode;
 
-    @Column(nullable = false, length = 1000)
+    @Column(name = "REASON", nullable = false, length = 4000)
     private String reason;
 
-    @Column(name = "user_facing_guidance", length = 2000)
+    @Column(name = "USER_FACING_GUIDANCE", length = 4000)
     private String userFacingGuidance;
+
+    @Column(name = "CREATED_AT", nullable = false)
+    private Instant createdAt;
+
+    @Column(name = "UPDATED_AT", nullable = false)
+    private Instant updatedAt;
+
+    @PrePersist
+    void onCreate() {
+        Instant now = Instant.now();
+        if (createdAt == null) {
+            createdAt = now;
+        }
+        updatedAt = now;
+    }
+
+    @PreUpdate
+    void onUpdate() {
+        updatedAt = Instant.now();
+    }
 
     public Long getId() {
         return id;
@@ -127,5 +145,13 @@ public class IncidentResolutionRuleEntity {
 
     public void setUserFacingGuidance(String userFacingGuidance) {
         this.userFacingGuidance = userFacingGuidance;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
+    }
+
+    public Instant getUpdatedAt() {
+        return updatedAt;
     }
 }

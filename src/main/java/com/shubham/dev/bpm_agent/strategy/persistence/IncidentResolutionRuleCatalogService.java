@@ -6,10 +6,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Arrays;
-import java.util.Collection;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 @Service
 public class IncidentResolutionRuleCatalogService {
@@ -20,18 +19,12 @@ public class IncidentResolutionRuleCatalogService {
         this.repository = repository;
     }
 
-    public List<IncidentResolutionRule> findRulesForWorkflow(String workflowProcessDefinitionId) {
-        return repository.findByWorkflowProcessDefinitionIdAndEnabledTrueOrderByPriorityAscIdAsc(workflowProcessDefinitionId)
-                .stream()
-                .map(this::toRule)
-                .toList();
-    }
-
-    public List<IncidentResolutionRule> findRulesForWorkflows(Collection<String> workflowProcessDefinitionIds) {
+    public List<IncidentResolutionRule> findRulesForWorkflows(Set<String> workflowProcessDefinitionIds) {
         if (workflowProcessDefinitionIds == null || workflowProcessDefinitionIds.isEmpty()) {
             return List.of();
         }
-        return repository.findByWorkflowProcessDefinitionIdInAndEnabledTrueOrderByPriorityAscIdAsc(workflowProcessDefinitionIds)
+
+        return repository.findByEnabledTrueAndWorkflowProcessDefinitionIdInOrderByPriorityAscIdAsc(workflowProcessDefinitionIds)
                 .stream()
                 .map(this::toRule)
                 .toList();
@@ -41,37 +34,41 @@ public class IncidentResolutionRuleCatalogService {
         return new IncidentResolutionRule(
                 entity.getInstruction(),
                 Set.of(entity.getWorkflowProcessDefinitionId()),
-                parseCsvSet(entity.getErrorTypes()),
-                parseIntegerSet(entity.getHttpStatusCodes()),
-                parseCsvList(entity.getMessageContains()),
+                splitToStringSet(entity.getErrorTypes()),
+                splitToIntegerSet(entity.getHttpStatusCodes()),
+                splitToList(entity.getMessageContains()),
                 IncidentResolutionMode.valueOf(entity.getResolutionMode()),
                 entity.getReason(),
-                entity.getUserFacingGuidance() == null ? "" : entity.getUserFacingGuidance()
+                entity.getUserFacingGuidance()
         );
     }
 
-    private Set<String> parseCsvSet(String value) {
+    private Set<String> splitToStringSet(String value) {
         if (!StringUtils.hasText(value)) {
             return Set.of();
         }
-        return Arrays.stream(value.split(","))
+        Set<String> result = new LinkedHashSet<>();
+        Arrays.stream(value.split(","))
                 .map(String::trim)
                 .filter(StringUtils::hasText)
-                .collect(Collectors.toSet());
+                .forEach(result::add);
+        return Set.copyOf(result);
     }
 
-    private Set<Integer> parseIntegerSet(String value) {
+    private Set<Integer> splitToIntegerSet(String value) {
         if (!StringUtils.hasText(value)) {
             return Set.of();
         }
-        return Arrays.stream(value.split(","))
+        Set<Integer> result = new LinkedHashSet<>();
+        Arrays.stream(value.split(","))
                 .map(String::trim)
                 .filter(StringUtils::hasText)
                 .map(Integer::parseInt)
-                .collect(Collectors.toSet());
+                .forEach(result::add);
+        return Set.copyOf(result);
     }
 
-    private List<String> parseCsvList(String value) {
+    private List<String> splitToList(String value) {
         if (!StringUtils.hasText(value)) {
             return List.of();
         }

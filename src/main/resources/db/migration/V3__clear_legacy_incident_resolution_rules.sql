@@ -1,1 +1,1 @@
-DELETE FROM incident_resolution_rule;
+delete from INCIDENT_RESOLUTION_RULE;
