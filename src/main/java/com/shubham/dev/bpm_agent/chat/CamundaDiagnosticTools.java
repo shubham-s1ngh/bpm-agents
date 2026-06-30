@@ -6,20 +6,26 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.tool.annotation.Tool;
 import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import java.util.*;
 
 @Component
 public class CamundaDiagnosticTools {
 
-    private static final int INCIDENT_VERIFICATION_ATTEMPTS = 4;
-    private static final long INCIDENT_VERIFICATION_DELAY_MS = 400L;
-
     private final CamundaOrchestrationClient clusterClient;
     private static final Logger log = LoggerFactory.getLogger(CamundaDiagnosticTools.class);
+    private final int incidentVerificationAttempts;
+    private final long incidentVerificationDelayMs;
 
-    public CamundaDiagnosticTools(CamundaOrchestrationClient clusterClient) {
+    @Autowired
+    public CamundaDiagnosticTools(CamundaOrchestrationClient clusterClient,
+                                  @Value("${app.camunda.incident-verification.attempts:8}") int incidentVerificationAttempts,
+                                  @Value("${app.camunda.incident-verification.delay-ms:500}") long incidentVerificationDelayMs) {
         this.clusterClient = clusterClient;
+        this.incidentVerificationAttempts = incidentVerificationAttempts;
+        this.incidentVerificationDelayMs = incidentVerificationDelayMs;
     }
 
     @Tool(
@@ -217,12 +223,12 @@ public class CamundaDiagnosticTools {
         log.info("[MUTATION TOOL CALL] resolveIncidentsByProcessInstance invoked for Process Instance Key: {}", processInstanceKey);
         try {
             Long normalizedProcessInstanceKey = Long.parseLong(processInstanceKey.trim());
-            List<Map<String, Object>> incidentsBeforeResolution = filterActiveIncidents(clusterClient.getIncidents(normalizedProcessInstanceKey));
+            ProcessIncidentSnapshot incidentsBeforeResolution = collectActiveIncidentsAcrossTree(normalizedProcessInstanceKey);
             if (incidentsBeforeResolution.isEmpty()) {
                 Map<String, Object> currentDiagnostics = diagnoseProcessInstanceTree(normalizedProcessInstanceKey, 0, new HashSet<>());
                 return Map.of(
                         "status", "NO_ACTION",
-                        "message", "No active incidents were returned by Camunda for processInstanceKey " + normalizedProcessInstanceKey + ".",
+                        "message", "No active incidents were returned by Camunda for processInstanceKey " + normalizedProcessInstanceKey + " or its child process instances.",
                         "processInstanceKey", normalizedProcessInstanceKey,
                         "postResolutionDiagnostics", currentDiagnostics,
                         "resolutionCommandAttempts", 0,
@@ -230,33 +236,41 @@ public class CamundaDiagnosticTools {
                 );
             }
 
-            clusterClient.resolveIncidentsByProcessInstance(normalizedProcessInstanceKey);
-            IncidentListPollResult incidentListPollResult = pollActiveIncidentsUntilStable(normalizedProcessInstanceKey);
-            List<Map<String, Object>> incidentsAfterResolution = incidentListPollResult.incidents();
+            int resolutionCommandAttempts = 0;
+            for (Long targetProcessInstanceKey : incidentsBeforeResolution.processInstanceKeysWithActiveIncidents()) {
+                clusterClient.resolveIncidentsByProcessInstance(targetProcessInstanceKey);
+                resolutionCommandAttempts++;
+            }
+
+            IncidentTreePollResult incidentTreePollResult = pollActiveIncidentsAcrossTreeUntilStable(normalizedProcessInstanceKey);
+            ProcessIncidentSnapshot incidentsAfterResolution = incidentTreePollResult.snapshot();
 
             if (!incidentsAfterResolution.isEmpty()) {
                 Map<String, Object> postResolutionDiagnostics = diagnoseProcessInstanceTree(normalizedProcessInstanceKey, 0, new HashSet<>());
                 return Map.of(
                         "status", "FAILED",
-                        "message", "Camunda accepted the process-instance incident resolution command, but active incidents still remain after verification.",
+                        "message", "Camunda accepted the process-instance incident resolution command, but active incidents still remain in the process tree after verification.",
                         "processInstanceKey", normalizedProcessInstanceKey,
-                        "incidentsBeforeResolution", incidentsBeforeResolution,
-                        "remainingIncidents", incidentsAfterResolution,
+                        "incidentsBeforeResolution", incidentsBeforeResolution.incidents(),
+                        "affectedProcessInstanceKeys", incidentsBeforeResolution.processInstanceKeysWithActiveIncidents(),
+                        "remainingIncidents", incidentsAfterResolution.incidents(),
+                        "remainingProcessInstanceKeys", incidentsAfterResolution.processInstanceKeysWithActiveIncidents(),
                         "postResolutionDiagnostics", postResolutionDiagnostics,
-                        "resolutionCommandAttempts", 1,
-                        "verificationChecks", incidentListPollResult.verificationChecks()
+                        "resolutionCommandAttempts", resolutionCommandAttempts,
+                        "verificationChecks", incidentTreePollResult.verificationChecks()
                 );
             }
 
             Map<String, Object> postResolutionDiagnostics = diagnoseProcessInstanceTree(normalizedProcessInstanceKey, 0, new HashSet<>());
             return Map.of(
                     "status", "SUCCESS",
-                    "message", "Process-instance incident resolution instruction processed by Camunda and no active incidents remain for this process instance.",
+                    "message", "Process-instance incident resolution instruction processed by Camunda and no active incidents remain for this process instance or its child process instances.",
                     "processInstanceKey", normalizedProcessInstanceKey,
-                    "resolvedIncidents", incidentsBeforeResolution,
+                    "resolvedIncidents", incidentsBeforeResolution.incidents(),
+                    "affectedProcessInstanceKeys", incidentsBeforeResolution.processInstanceKeysWithActiveIncidents(),
                     "postResolutionDiagnostics", postResolutionDiagnostics,
-                    "resolutionCommandAttempts", 1,
-                    "verificationChecks", incidentListPollResult.verificationChecks()
+                    "resolutionCommandAttempts", resolutionCommandAttempts,
+                    "verificationChecks", incidentTreePollResult.verificationChecks()
             );
         } catch (Exception e) {
             log.error("[MUTATION TOOL ERROR] Failed to resolve incidents for processInstanceKey {}: {}", processInstanceKey, e.getMessage());
@@ -266,7 +280,7 @@ public class CamundaDiagnosticTools {
 
     private IncidentPollResult pollIncidentUntilStable(String incidentKey) throws JsonProcessingException {
         Map<String, Object> lastIncident = Map.of();
-        for (int attempt = 1; attempt <= INCIDENT_VERIFICATION_ATTEMPTS; attempt++) {
+        for (int attempt = 1; attempt <= incidentVerificationAttempts; attempt++) {
             try {
                 lastIncident = clusterClient.getIncidentByKey(incidentKey);
             } catch (Exception exception) {
@@ -281,24 +295,63 @@ public class CamundaDiagnosticTools {
 
             sleepForVerificationWindow();
         }
-        return new IncidentPollResult(lastIncident, INCIDENT_VERIFICATION_ATTEMPTS);
+        return new IncidentPollResult(lastIncident, incidentVerificationAttempts);
     }
 
-    private IncidentListPollResult pollActiveIncidentsUntilStable(Long processInstanceKey) throws JsonProcessingException {
-        List<Map<String, Object>> remainingIncidents = List.of();
-        for (int attempt = 1; attempt <= INCIDENT_VERIFICATION_ATTEMPTS; attempt++) {
-            remainingIncidents = filterActiveIncidents(clusterClient.getIncidents(processInstanceKey));
+    private ProcessIncidentSnapshot collectActiveIncidentsAcrossTree(Long rootProcessInstanceKey) throws JsonProcessingException {
+        Set<Long> visitedKeys = new LinkedHashSet<>();
+        collectProcessTreeKeys(rootProcessInstanceKey, visitedKeys);
+        return collectActiveIncidentsAcrossTree(visitedKeys);
+    }
+
+    private ProcessIncidentSnapshot collectActiveIncidentsAcrossTree(Set<Long> processTreeKeys) throws JsonProcessingException {
+        List<Map<String, Object>> activeIncidents = new ArrayList<>();
+        List<Long> processInstanceKeysWithActiveIncidents = new ArrayList<>();
+        for (Long processInstanceKey : processTreeKeys) {
+            List<Map<String, Object>> incidents = filterActiveIncidents(clusterClient.getIncidents(processInstanceKey));
+            if (!incidents.isEmpty()) {
+                activeIncidents.addAll(incidents);
+                processInstanceKeysWithActiveIncidents.add(processInstanceKey);
+            }
+        }
+
+        return new ProcessIncidentSnapshot(
+                List.copyOf(activeIncidents),
+                List.copyOf(processInstanceKeysWithActiveIncidents)
+        );
+    }
+
+    private void collectProcessTreeKeys(Long processInstanceKey, Set<Long> visitedKeys) throws JsonProcessingException {
+        if (processInstanceKey == null || !visitedKeys.add(processInstanceKey)) {
+            return;
+        }
+
+        List<Map<String, Object>> childInstances = clusterClient.searchChildProcessInstances(processInstanceKey, 100);
+        for (Map<String, Object> childInstance : childInstances) {
+            Long childProcessInstanceKey = parseLongValue(childInstance.get("processInstanceKey"));
+            if (childProcessInstanceKey != null) {
+                collectProcessTreeKeys(childProcessInstanceKey, visitedKeys);
+            }
+        }
+    }
+
+    private IncidentTreePollResult pollActiveIncidentsAcrossTreeUntilStable(Long processInstanceKey) throws JsonProcessingException {
+        Set<Long> processTreeKeys = new LinkedHashSet<>();
+        collectProcessTreeKeys(processInstanceKey, processTreeKeys);
+        ProcessIncidentSnapshot remainingIncidents = new ProcessIncidentSnapshot(List.of(), List.of());
+        for (int attempt = 1; attempt <= incidentVerificationAttempts; attempt++) {
+            remainingIncidents = collectActiveIncidentsAcrossTree(processTreeKeys);
             if (remainingIncidents.isEmpty()) {
-                return new IncidentListPollResult(List.of(), attempt);
+                return new IncidentTreePollResult(remainingIncidents, attempt);
             }
             sleepForVerificationWindow();
         }
-        return new IncidentListPollResult(remainingIncidents, INCIDENT_VERIFICATION_ATTEMPTS);
+        return new IncidentTreePollResult(remainingIncidents, incidentVerificationAttempts);
     }
 
     private void sleepForVerificationWindow() {
         try {
-            Thread.sleep(INCIDENT_VERIFICATION_DELAY_MS);
+            Thread.sleep(incidentVerificationDelayMs);
         } catch (InterruptedException interruptedException) {
             Thread.currentThread().interrupt();
             log.warn("[MUTATION VERIFY] Verification polling interrupted.");
@@ -308,6 +361,13 @@ public class CamundaDiagnosticTools {
     private record IncidentPollResult(Map<String, Object> incident, int verificationChecks) {
     }
 
-    private record IncidentListPollResult(List<Map<String, Object>> incidents, int verificationChecks) {
+    private record IncidentTreePollResult(ProcessIncidentSnapshot snapshot, int verificationChecks) {
+    }
+
+    private record ProcessIncidentSnapshot(List<Map<String, Object>> incidents,
+                                          List<Long> processInstanceKeysWithActiveIncidents) {
+        private boolean isEmpty() {
+            return incidents == null || incidents.isEmpty();
+        }
     }
 }

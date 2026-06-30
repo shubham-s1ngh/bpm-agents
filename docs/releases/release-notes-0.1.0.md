@@ -2,7 +2,7 @@
 
 ## Overview
 
-`0.1.0` is the first structured release of the Camunda workflow agent framework. This release stabilizes the core architecture for workflow-context resolution, Camunda-backed diagnostics, grounded LLM reporting, and controlled incident-resolution flows.
+`0.1.0` is the first structured release of the Camunda workflow agent framework. This release stabilizes workflow-context resolution, Camunda-backed diagnostics, consultant-managed retry policy, grounded reporting, and controlled incident-resolution flows.
 
 ## Highlights
 
@@ -38,14 +38,17 @@ Current strategy support includes:
 
 ### 3. Grounded Evidence-Based Reporting
 
-The final report remains LLM-written, but is now constrained by:
+Read-only diagnostic reports remain LLM-written, but are now constrained by:
 
 - deterministic evidence normalization
 - canonical evidence digests
+- vector-retrieved workflow knowledge
 - grounding validation
 - sanitize fallback when the model leaks unsupported values
 
-This reduces hallucination risk while keeping the response readable.
+Incident-resolution reports now render deterministically from Camunda JSON so child process keys, final flow elements, and verified post-retry state cannot be lost in model retries.
+
+This reduces hallucination risk while keeping diagnostic responses readable.
 
 ### 4. Dynamic Camunda Diagnostics
 
@@ -67,12 +70,26 @@ Incident mutation support was redesigned and hardened:
 
 Key behaviors:
 - mutation allowed only on explicit retry intent
+- workflow strategy policy consulted before single-order and bulk-order retry mutation
 - post-resolution verification polling
 - active-incident filtering by incident state
 - readable mutation outcome reports
 - current diagnostic snapshot included after resolution or no-action outcomes
+- root-versus-process-tree incident visibility preserved when only a child subprocess has the active incident
 
-### 6. Retry Observability
+### 6. Consultant Rule Catalog And BPMN Drafting
+
+Consultant-managed retry policy is now persisted and editable:
+
+- H2 file-backed rule catalog with Flyway migrations
+- CRUD admin API for incident rules
+- consultant-facing rule editor UI
+- BPMN upload flow for draft rule suggestions
+- immediate rule-index refresh for vector-backed reporting context
+
+This lets business consultants manage retry policy without editing Java code.
+
+### 7. Retry Observability
 
 Retry-related responses now expose:
 - `resolutionCommandAttempts`
@@ -117,7 +134,8 @@ now:
 ## Current Known Limits
 
 - `searchProcessInstances` still searches by variable and does not yet enforce workflow `processId` at the tool level.
-- incident-resolution policy is not yet strategy-driven; generic orchestration still decides whether retry should proceed.
+- the current bulk retry path is still order-workflow-specific and does not yet expose a generic batch contract across every workflow strategy.
+- the admin UI is currently served directly at `/admin/incident-rules/index.html`.
 - the project artifact is now released as `0.1.0`, but the Spring parent remains on `3.5.15-SNAPSHOT`.
 
 ## Documentation Added or Updated
@@ -135,6 +153,7 @@ Focused tests now cover:
 - report contract behavior
 - grounding validation
 - incident-resolution outcome semantics
+- consultant-rule persistence and vector-backed workflow knowledge retrieval
 
 Representative test files:
 - `src/test/java/com/shubham/dev/bpm_agent/chat/CamundaDiagnosticToolsTest.java`
@@ -145,8 +164,8 @@ Representative test files:
 
 ## Recommended Next Step
 
-The next architectural step should be to move incident-resolution policy into workflow strategies so each workflow can decide:
-- whether retry is allowed
-- which incident types are retryable
-- whether retry should be blocked and replaced with guidance
-- which resolution mode is preferred
+The next architectural step should be to broaden the current rule and retrieval model beyond the order workflow so each new workflow can contribute:
+- workflow-specific batch identifier extraction
+- workflow-specific BPMN knowledge indexing
+- workflow-specific retry policy and guidance
+- workflow-specific report interpretation rules

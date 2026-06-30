@@ -1,9 +1,31 @@
 spring:
   application:
     name: bpm-ai
+  datasource:
+    # Default local rule catalog. Override these in higher environments to move Flyway-managed rules to PostgreSQL, MySQL, or another RDBMS.
+    url: ${SPRING_DATASOURCE_URL:jdbc:h2:file:./data/bpm_ai;MODE=PostgreSQL;AUTO_SERVER=TRUE}
+    username: ${SPRING_DATASOURCE_USERNAME:sa}
+    password: ${SPRING_DATASOURCE_PASSWORD:}
+    driver-class-name: org.h2.Driver
+  h2:
+    console:
+      # Local consultant-friendly DB inspection: http://localhost:8081/h2-console
+      enabled: ${SPRING_H2_CONSOLE_ENABLED:true}
+      path: /h2-console
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
   ai:
     model:
       chat: openai
+      embedding: ollama
     openai:
       api-key: ${OPENAI_API_KEY:not-needed}
       base-url: ${GPT4ALL_BASE_URL:http://localhost:11434}
@@ -20,9 +42,16 @@ spring:
           model: ${OLLAMA_MODEL:qwen2.5-coder:7b}
           temperature: ${OLLAMA_TEMPERATURE:0.0}
           tool-choice: auto
+      embedding:
+        options:
+          model: ${OLLAMA_EMBEDDING_MODEL:nomic-embed-text}
 # ── Server port (avoids conflict with Camunda on 8080) ───────────────
 server:
   port: 8081
+  servlet:
+    multipart:
+      max-file-size: ${SERVER_SERVLET_MULTIPART_MAX_FILE_SIZE:5MB}
+      max-request-size: ${SERVER_SERVLET_MULTIPART_MAX_REQUEST_SIZE:20MB}
 
 # ── Camunda 8.9 local run (c8run Windows) ────────────────────────────
 # io.camunda.client package = camunda-spring-boot-3-starter
@@ -51,14 +80,33 @@ camunda:
 
 
 app:
-  ai:
-    # Enables only the /api/chat/tools endpoint.
-    # /api/chat always sends plain chat requests without tools for broad provider compatibility.
-    tools-enabled: ${APP_AI_TOOLS_ENABLED:true}
   camunda:
+    incident-verification:
+      # Poll long enough for the worker to pick the job up again after incident resolution.
+      attempts: ${APP_CAMUNDA_INCIDENT_VERIFICATION_ATTEMPTS:8}
+      delay-ms: ${APP_CAMUNDA_INCIDENT_VERIFICATION_DELAY_MS:500}
     notification:
       # Optional: BPMN process id used for notification flows.
       process-id: ${APP_CAMUNDA_NOTIFICATION_PROCESS_ID:}
       # Optional: service task id that sends notifications within that process.
       service-task-id: ${APP_CAMUNDA_NOTIFICATION_SERVICE_TASK_ID:}
+  ai:
+    # Enables only the /api/chat/tools endpoint.
+    # /api/chat always sends plain chat requests without tools for broad provider compatibility.
+    tools-enabled: ${APP_AI_TOOLS_ENABLED:true}
+    retrieval:
+      enabled: ${APP_AI_RETRIEVAL_ENABLED:true}
+      top-k: ${APP_AI_RETRIEVAL_TOP_K:4}
+      store-path: ${APP_AI_RETRIEVAL_STORE_PATH:data/ai/workflow-knowledge-vector-store.json}
 
+  mock-services:
+    # Workers call the local mock APIs to simulate retryable and non-retryable connector failures.
+    base-url: ${APP_MOCK_SERVICES_BASE_URL:http://localhost:8081}
+    # Disable this for a stable happy-path run with no random transient failures.
+    random-5xx-enabled: ${APP_MOCK_SERVICES_RANDOM_5XX_ENABLED:false}
+    random-5xx-one-out-of: ${APP_MOCK_SERVICES_RANDOM_5XX_ONE_OUT_OF:1}
+    # When true, worker-side HTTP 5xx failures are converted into immediate incidents by setting retries to 0.
+    immediate-incident-on-5xx: ${APP_MOCK_SERVICES_IMMEDIATE_INCIDENT_ON_5XX:true}
+
+# Minimal admin UI for consultant-managed incident rules and BPMN-assisted draft generation:
+#   http://localhost:8081/admin/incident-rules/

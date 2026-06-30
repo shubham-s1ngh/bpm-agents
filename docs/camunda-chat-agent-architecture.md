@@ -38,6 +38,7 @@ flowchart LR
     subgraph evidence["Evidence + Reporting Layer"]
         digest["CamundaEvidenceDigestService"]
         report["CamundaDiagnosticReportService"]
+        retrieval["WorkflowKnowledgeVectorStoreService"]
         validator["CamundaReportGroundingValidator"]
         snapshot["CamundaEvidenceSnapshot\nCamundaInstanceEvidence"]
     end
@@ -53,6 +54,7 @@ flowchart LR
     chatService --> dispatch --> tools --> camundaClient --> camunda
     tools --> chatService
     chatService --> digest --> snapshot
+    report --> retrieval
     snapshot --> report
     report --> llm
     report --> validator
@@ -69,7 +71,7 @@ flowchart LR
     class controller webFill;
     class chatService,registry,strategy orchestrationFill;
     class dispatch,tools,camundaClient toolFill;
-    class digest,report,validator,snapshot evidenceFill;
+    class digest,report,retrieval,validator,snapshot evidenceFill;
     class llm,camunda externalFill;
 ```
 
@@ -162,6 +164,12 @@ sequenceDiagram
   - Delegates prompt handling to `CamundaAgentChatService`.
   - Returns plain-text markdown to the caller.
 
+- `src/main/java/com/shubham/dev/bpm_agent/strategy/admin/IncidentResolutionRuleAdminController.java`
+  - Thin JSON admin adapter for the persisted incident-rule catalog.
+  - Exposes list, metadata, create, update, enable/disable, and delete operations for consultant-managed rule editing.
+  - Accepts BPMN file uploads and returns advisory rule drafts generated from BPMN parsing plus bounded LLM assistance.
+  - Keeps rule validation and normalization in a dedicated service instead of embedding persistence logic in the controller.
+
 ### Application Service Layer
 
 - `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaAgentChatService.java`
@@ -171,6 +179,8 @@ sequenceDiagram
   - Runs the tool-calling loop.
   - Detects direct `processInstanceKey` and `incidentKey` requests.
   - Applies explicit retry-intent gating for mutation tools.
+  - Uses workflow strategy policy to evaluate both single-order and bulk-order retry requests before mutation dispatch.
+  - Supports a deterministic bulk retry path for multiple `orderId` values in one prompt under the order workflow.
   - Short-circuits into final report generation once deep diagnostics are available.
   - Routes retry outcomes through the report service so mutation responses are returned as grounded markdown instead of raw JSON.
 
@@ -191,6 +201,7 @@ sequenceDiagram
     - `resolveIncidentByKey`
     - `resolveIncidentsByProcessInstance`
   - Verifies post-resolution incident state before declaring success for mutation operations.
+  - For process-instance resolution, traverses the parent/child process tree so child workflow incidents are included in both the resolution attempt and verification pass.
 
 - `src/main/java/com/shubham/dev/bpm_agent/camunda/CamundaOrchestrationClient.java`
   - Encapsulates Camunda 8 REST calls.
@@ -203,6 +214,7 @@ sequenceDiagram
   - Builds a digest that is easier for the report model to reason over than nested raw JSON.
   - Normalizes both diagnostic payloads and incident-resolution payloads.
   - Keeps normalization deterministic and avoids inferring runtime state from mutation results.
+  - Explicitly distinguishes direct root incident counts from full process-tree incident counts for read-only reporting.
   - Extracts:
     - allowed numeric identifiers
     - allowed process-like identifiers
@@ -215,14 +227,39 @@ sequenceDiagram
   - Minimal per-instance evidence for semantic grounding checks.
   - For incident-resolution payloads, tracks only currently remaining incidents as active evidence.
 
+- `src/main/java/com/shubham/dev/bpm_agent/chat/model/incident/*`
+  - Explicit workflow-policy models for incident resolution.
+  - Defines resolution context, decision, preferred resolution mode, and ordered rule matching without moving evidence normalization into the LLM.
+
+- `src/main/java/com/shubham/dev/bpm_agent/strategy/persistence/*`
+  - Persistence layer for workflow incident-resolution rules.
+  - Supports UI-managed policy data through a Flyway-managed relational schema instead of requiring Java code changes for every rule edit.
+  - `IncidentResolutionRuleManagementService` normalizes admin input before it is stored so strategy evaluation stays deterministic.
+
+- `src/main/resources/static/admin/incident-rules/index.html`
+  - Minimal local admin UI for business consultants and operators.
+  - Uses the admin JSON endpoints directly and does not introduce a separate frontend build pipeline.
+  - Supports BPMN parent/subprocess upload so candidate incident rules can be drafted before a consultant saves them.
+
+- `src/main/java/com/shubham/dev/bpm_agent/camunda/mock/*`
+  - Local mock HTTP endpoints and a worker-facing client for reproducible connector failures.
+  - Supports transient HTTP 500 scenarios and non-retryable HTTP 400 scenarios for worker testing.
+
 ### Reporting Layer
 
 - `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java`
-  - Creates the report-only model client.
+  - Deterministically renders incident-resolution payloads directly from Camunda JSON so verified child-process and flow-element evidence cannot be dropped by report-model retries.
+  - Creates the report-only model client for read-only diagnostic payloads.
   - Uses the canonical evidence digest instead of raw nested payload as the primary reporting context.
+  - Pulls top-K workflow knowledge snippets from the local vector store for read-only reporting so the LLM gets BPMN and consultant-rule context without being allowed to invent live runtime state.
   - Enforces markdown-only final output.
   - Retries once after grounding rejection.
   - Falls back to sanitization if the model still leaks unsupported identifiers or contradictions.
+
+- `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java`
+  - Indexes workflow strategy context and consultant-managed incident rules into a local Spring AI `SimpleVectorStore`.
+  - Refreshes the knowledge index on startup and after rule CRUD operations.
+  - Supplies similarity-searched workflow context only for LLM explanation, not for live runtime evidence.
 
 ### Validation Layer
 
@@ -246,16 +283,24 @@ sequenceDiagram
    - for diagnosis prompts, it calls `diagnoseProcessInstance`
    - for explicit retry prompts, it calls `resolveIncidentsByProcessInstance`
 5. If the prompt contains a direct `incidentKey` together with explicit retry intent, the agent calls `resolveIncidentByKey`.
-6. Otherwise the execution model is prompted to emit one of the allowed tool JSON blocks.
-7. `CamundaToolDispatchService` parses and dispatches the tool call.
-8. If a process search returns an active instance, the agent deterministically escalates:
+6. If the prompt contains multiple `orderId` values together with explicit retry intent, the agent uses a deterministic bulk route:
+   - search each `orderId`
+   - isolate the active process instance for that order when present
+   - diagnose each active match
+   - build a strategy-owned incident-resolution decision for each order independently
+   - execute process-instance or incident-key resolution only when that per-order decision allows it
+   - return a markdown bulk summary with per-order outcomes
+7. Otherwise the execution model is prompted to emit one of the allowed tool JSON blocks.
+8. `CamundaToolDispatchService` parses and dispatches the tool call.
+9. If a process search returns an active instance, the agent deterministically escalates:
    - to `diagnoseProcessInstance` for read-only diagnostic prompts
    - to `resolveIncidentsByProcessInstance` for explicit retry prompts
-9. Once a diagnostic or mutation payload is available, `CamundaDiagnosticReportService` builds a canonical evidence digest using `CamundaEvidenceDigestService`.
-10. The report model generates markdown from the digest.
-11. `CamundaReportGroundingValidator` validates the report against the evidence snapshot.
-12. If grounding fails, the report service retries once with explicit rejection reasons.
-13. If grounding still fails, the report is sanitized and returned.
+10. Once a diagnostic or mutation payload is available, `CamundaDiagnosticReportService` builds a canonical evidence digest using `CamundaEvidenceDigestService`.
+11. Incident-resolution payloads are rendered deterministically from Camunda JSON so post-retry child-process evidence remains exact.
+12. Read-only diagnostic payloads still use the report model to generate markdown from the digest, augmented with vector-retrieved BPMN and consultant-rule context.
+13. `CamundaReportGroundingValidator` validates model-rendered reports against the evidence snapshot.
+14. If grounding fails, the report service retries once with explicit rejection reasons.
+15. If grounding still fails, the report is sanitized and returned.
 
 ## Why This Structure Is Better Than the Original Controller
 
@@ -280,9 +325,16 @@ That made the class large, fragile, and difficult to test. The current structure
 
 - The final response is agent-generated, not Java-template-generated.
 - The final response must remain grounded to Camunda evidence.
+- Vector-retrieved workflow knowledge can guide LLM explanation, but it must never override live Camunda state, process-instance keys, incident counts, or variables.
 - The report path uses a report-only chat client and must never emit tool JSON.
 - Mutation operations remain explicit and retry-intent-gated.
+- Workflow strategies can now describe incident-resolution policy, but orchestration must stay generic and must not embed workflow-specific retry rules.
+- The default local rule store is now file-backed H2 with Flyway-managed migrations so the same schema can be promoted to PostgreSQL or another database in higher environments.
+- A consultant-facing rule editor is available at `http://localhost:8081/admin/incident-rules/index.html`, while H2 remains available at `http://localhost:8081/h2-console` for low-level inspection.
+- The BPMN upload assistant is advisory only: it can prepopulate draft rules, but it does not persist anything until the consultant explicitly saves a rule.
+- Worker-generated connector incidents should include grounded failure details such as job type and HTTP status so strategy rules can classify retryability deterministically.
 - Mutation command acceptance is not treated as operational success; post-resolution verification determines final retry outcome.
+- Process-instance incident resolution must not report `NO_ACTION` merely because the root instance is clean when a child process instance still has active incidents.
 - The evidence layer must normalize structure only; it must not infer process runtime state from incident-resolution results.
 
 ## Testing Coverage Added

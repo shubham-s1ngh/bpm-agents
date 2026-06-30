@@ -1,10 +1,25 @@
 package com.shubham.dev.bpm_agent.strategy;
 
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionContext;
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionMode;
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionRule;
+import com.shubham.dev.bpm_agent.strategy.persistence.IncidentResolutionRuleCatalogService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 public class OrderWorkflowStrategy implements WorkflowContextStrategy {
+
+    private final IncidentResolutionRuleCatalogService ruleCatalogService;
+
+    @Autowired
+    public OrderWorkflowStrategy(IncidentResolutionRuleCatalogService ruleCatalogService) {
+        this.ruleCatalogService = ruleCatalogService;
+    }
 
     @Override
     public String getProcessDefinitionId() {
@@ -82,6 +97,21 @@ public class OrderWorkflowStrategy implements WorkflowContextStrategy {
     }
 
     @Override
+    public String primaryBusinessIdentifierVariable() {
+        return "orderId";
+    }
+
+    @Override
+    public List<String> extractBusinessIdentifiers(String userPrompt) {
+        Matcher matcher = Pattern.compile("\\bORD-\\d+\\b", Pattern.CASE_INSENSITIVE).matcher(userPrompt);
+        Set<String> orderIds = new LinkedHashSet<>();
+        while (matcher.find()) {
+            orderIds.add(matcher.group().toUpperCase(Locale.ROOT));
+        }
+        return List.copyOf(orderIds);
+    }
+
+    @Override
     public String generateReportStructuringInstructions() {
         return """
             WORKFLOW-SPECIFIC REPORTING RULES FOR [handleOrderId]:
@@ -96,6 +126,75 @@ public class OrderWorkflowStrategy implements WorkflowContextStrategy {
             """;
     }
 
+    @Override
+    public List<IncidentResolutionRule> incidentResolutionRules() {
+        List<IncidentResolutionRule> persistedRules = ruleCatalogService.findRulesForWorkflows(managedProcessDefinitionIds());
+        if (!persistedRules.isEmpty()) {
+            return persistedRules;
+        }
+        return defaultIncidentResolutionRules();
+    }
+
+    private Set<String> managedProcessDefinitionIds() {
+        return Set.of(
+                "handleOrderId",
+                "subProcess_InventorySystem",
+                "subProcess_PaymentGateway",
+                "advanceCategory_processId",
+                "regularCategory_ProcessId",
+                "subProcess_NotificationSystem"
+        );
+    }
+
+    private List<IncidentResolutionRule> defaultIncidentResolutionRules() {
+        return List.of(
+                new IncidentResolutionRule(
+                        "Block retry when the incident indicates a called-process deployment or BPMN configuration mismatch.",
+                        managedProcessDefinitionIds(),
+                        Set.of("called_element_error"),
+                        Set.of(),
+                        List.of("called element", "deployment", "not found"),
+                        IncidentResolutionMode.BLOCKED,
+                        "Order workflow blocks retry for called-element deployment incidents until BPMN deployment alignment is fixed.",
+                        "Retry is blocked for this order workflow because the incident points to a called-process deployment or configuration mismatch. Align the parent BPMN called-process ID with the deployed child BPMN before retrying."
+                ),
+                new IncidentResolutionRule(
+                        "Allow retry for transient HTTP 500 failures from the inventory reservation connector or worker path.",
+                        Set.of("handleOrderId", "subProcess_InventorySystem"),
+                        Set.of("job_no_retries"),
+                        Set.of(500),
+                        List.of("inventory-reservation", "subprocess_inventorysystem", "inventory system"),
+                        IncidentResolutionMode.BY_PROCESS_INSTANCE,
+                        "Order workflow allows retry for transient inventory infrastructure failures that surfaced as HTTP 500 incidents.",
+                        ""
+                ),
+                new IncidentResolutionRule(
+                        "Allow retry for transient HTTP 500 failures from the payment charge connector or worker path.",
+                        Set.of("handleOrderId", "subProcess_PaymentGateway"),
+                        Set.of("job_no_retries"),
+                        Set.of(500),
+                        List.of("payment-charge", "subprocess_paymentgateway", "payment system"),
+                        IncidentResolutionMode.BY_PROCESS_INSTANCE,
+                        "Order workflow allows retry for transient payment infrastructure failures that surfaced as HTTP 500 incidents.",
+                        ""
+                ),
+                new IncidentResolutionRule(
+                        "Block retry for HTTP 400 bad request errors from payment capture because the request payload must be corrected first.",
+                        Set.of("handleOrderId", "subProcess_PaymentGateway"),
+                        Set.of("job_no_retries"),
+                        Set.of(400),
+                        List.of("payment-charge", "bad request"),
+                        IncidentResolutionMode.BLOCKED,
+                        "Order workflow blocks retry for payment bad-request incidents because the downstream service rejected the request payload.",
+                        "Retry is blocked for this order workflow because payment capture failed with HTTP 400 Bad Request. Correct the payment request data or worker input before retrying."
+                )
+        );
+    }
+
+    @Override
+    public String buildResolutionGuidance(IncidentResolutionContext context) {
+        return "For order workflows, prefer process-instance incident resolution for transient server-side failures, but block retries for deployment mismatches and payment bad-request incidents.";
+    }
 
     @Override
     public Map<String, String> translateVariables(String userPrompt) {
