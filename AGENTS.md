@@ -10,6 +10,24 @@
   - Camunda worker registration and workflow workers
   - evidence normalization and grounding validation
 
+## Framework Template Direction
+- Treat this repository as a reusable workflow-agent framework template, not as an order-only demo.
+- New workflow support should be added by extension, not by modifying generic orchestration for one-off cases.
+- Prefer adding framework seams before adding workflow-specific branching:
+  - strategy contracts
+  - strategy registries
+  - typed policy/context models
+  - admin catalog abstractions
+  - retrieval/indexing adapters
+- Keep `handleOrderId` as the reference implementation, but do not let it become the implicit default shape for every future workflow.
+- When introducing a new workflow:
+  - add a dedicated `WorkflowContextStrategy`
+  - keep its identifier extraction, BPMN context, report guidance, and retry policy inside that strategy
+  - avoid hardcoding identifier formats, variable names, or routing assumptions in `CamundaAgentChatService`
+- Prefer neutral names when code is truly framework-level.
+- Prefer workflow-specific names when code is intentionally workflow-bound.
+- If a class or method is currently order-specific, do not rename it to a generic name unless the implementation is actually generic.
+
 ## Package and Naming Rules
 - Use `com.shubham.dev.bpm_agent` as the root package for all new Java classes.
 - Do not introduce `bpm_ai`, `bpm-ai`, or any other package variant.
@@ -102,6 +120,57 @@
 - Do not treat Camunda mutation command acceptance as business success unless post-check evidence confirms the incident cleared.
 - Prefer process-instance incident resolution when the workflow instance is known and a specific incident key may be stale.
 - Keep workflow-specific identifier normalization in `WorkflowContextStrategy` implementations, not in generic orchestration code.
+- Do not collapse framework contracts back into order-specific shortcuts just because the current workflow is `handleOrderId`.
+- Do not let admin, retrieval, reporting, or worker APIs drift independently; if one contract changes, update all consumers in the same change.
+- Prefer typed records/classes over loosely coupled `Map` payload contracts for new framework surfaces, unless the data is intentionally dynamic Camunda evidence.
+
+## Loop Engineering Rules
+- Treat the orchestration loop as a framework concern with explicit invariants.
+- Every loop in the agent should have:
+  - a bounded iteration count
+  - a clear success exit
+  - a clear fallback exit
+  - duplicate-action protection
+  - mutation gating before side effects
+- Keep these loop phases separate:
+  - workflow resolution
+  - tool selection/execution
+  - evidence normalization
+  - policy evaluation
+  - mutation dispatch
+  - post-mutation verification
+  - final reporting
+- Do not mix reporting generation with tool-selection retries in the same uncontrolled loop.
+- Prefer deterministic short-circuit exits when enough evidence is already available.
+- When a mutation has been attempted, the next loop phase must be verification, not another speculative model pass.
+- Do not allow the model loop to improvise batching logic when deterministic Java orchestration can own it safely.
+- If the model repeats the same tool call with materially identical arguments, break the loop or switch modes rather than executing the same tool indefinitely.
+- If a workflow strategy can make a decision deterministically, ask the strategy before re-entering the model loop.
+- For mutation flows, the loop should operate on grounded state snapshots:
+  - pre-mutation evidence
+  - mutation result
+  - post-mutation evidence
+- Final user output should be derived from the last verified state, not from an earlier pre-mutation snapshot.
+- If post-mutation state advances the token or activates later subprocesses, reporting must use the latest snapshot rather than the incident-era snapshot.
+- Keep retry verification polling bounded and configurable through properties rather than hardcoded sleeps.
+- Prefer idempotent loop transitions:
+  - repeated diagnosis should not mutate state
+  - repeated verification should only observe state
+  - repeated reporting should not trigger new tools
+
+## Template Engineering Guidance
+- When adding a new reusable capability, ask which layer owns it first:
+  - strategy
+  - orchestration
+  - tool surface
+  - reporting
+  - admin/persistence
+  - retrieval
+- Add extension points before adding special cases.
+- If a new feature needs per-workflow behavior, design the framework contract first and then implement the order workflow against it.
+- Preserve deterministic evidence and policy boundaries even when adding richer LLM behavior.
+- Vector retrieval may enrich explanation, but it must not replace live Camunda state for runtime truth.
+- Consultant-managed rules should remain data-driven and workflow-scoped; avoid burying new policy back into ad hoc Java conditionals.
 
 ## Current Workflow-Specific Notes
 - Current primary workflow strategy is `handleOrderId`.
@@ -155,5 +224,9 @@ When changing tool names, retry semantics, workflow strategy behavior, evidence 
 - Confirm all new classes are under `com.shubham.dev.bpm_agent`.
 - Confirm workflow-specific behavior is implemented in strategies, not hardcoded in generic orchestration.
 - Confirm mutation tools remain explicit and gated.
+- Confirm framework-level names are only used for genuinely reusable behavior.
+- Confirm loop changes preserve bounded execution, duplicate-call protection, and deterministic post-mutation verification.
+- Confirm reporting uses the latest verified evidence snapshot for mutation flows.
+- Confirm repository/service/controller/test contracts are updated together when admin or retrieval APIs change.
 - Run the most relevant focused tests for the touched area.
 - Update architecture/context docs if behavior or contracts changed.
