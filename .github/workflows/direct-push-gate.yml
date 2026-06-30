@@ -1,0 +1,78 @@
+name: Direct Push Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  direct-push-gate:
+    name: Validate main branch entry path
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Allow pull request validation runs
+        if: github.event_name == 'pull_request'
+        run: |
+          echo "Pull request event detected for main."
+          echo "Direct push gate only enforces on push events."
+
+      - name: Check whether main push came through a merged pull request
+        if: github.event_name == 'push'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const sha = context.sha;
+            const branch = context.ref;
+
+            if (branch !== "refs/heads/main") {
+              core.info(`Skipping check for ${branch}.`);
+              return;
+            }
+
+            const response = await github.request(
+              "GET /repos/{owner}/{repo}/commits/{commit_sha}/pulls",
+              {
+                owner,
+                repo,
+                commit_sha: sha,
+                mediaType: {
+                  previews: ["groot"]
+                }
+              }
+            );
+
+            const mergedPullRequests = response.data.filter((pullRequest) => {
+              return pullRequest.merged_at && pullRequest.base?.ref === "main";
+            });
+
+            if (mergedPullRequests.length > 0) {
+              const pullRequestNumbers = mergedPullRequests
+                .map((pullRequest) => `#${pullRequest.number}`)
+                .join(", ");
+
+              core.notice(
+                `main was updated through merged pull request(s): ${pullRequestNumbers}.`
+              );
+              return;
+            }
+
+            const actor = context.actor;
+            const message = [
+              `Direct push detected on main for commit ${sha}.`,
+              `Actor: ${actor}.`,
+              "This repository uses a custom GitHub Actions gate because native push blocking is not available on the current plan.",
+              "Open a pull request for changes to main instead of pushing directly."
+            ].join(" ");
+
+            core.setFailed(message);
+
