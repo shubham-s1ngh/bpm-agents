@@ -1,13 +1,15 @@
 package com.shubham.dev.bpm_agent.camunda.workers;
 
-import io.camunda.client.CamundaClient;
+import com.shubham.dev.bpm_agent.camunda.mock.MockServiceClient;
 import io.camunda.client.api.response.ActivatedJob;
 import io.camunda.client.api.worker.JobClient;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import java.util.List;
+import org.springframework.web.client.RestClientResponseException;
+
 import java.util.Map;
 
 /**
@@ -19,11 +21,15 @@ public class SubProcessWorkers {
 
     private final Logger log = LoggerFactory.getLogger(this.getClass());
     private final AgentWorkerFactory workerFactory;
-    private final CamundaClient camundaClient;
+    private final MockServiceClient mockServiceClient;
+    private final boolean immediateIncidentOn5xxByDefault;
 
-    public SubProcessWorkers(AgentWorkerFactory workerFactory, CamundaClient camundaClient) {
+    public SubProcessWorkers(AgentWorkerFactory workerFactory,
+                             MockServiceClient mockServiceClient,
+                             @Value("${app.mock-services.immediate-incident-on-5xx:false}") boolean immediateIncidentOn5xxByDefault) {
         this.workerFactory = workerFactory;
-        this.camundaClient = camundaClient;
+        this.mockServiceClient = mockServiceClient;
+        this.immediateIncidentOn5xxByDefault = immediateIncidentOn5xxByDefault;
     }
 
     @PostConstruct
@@ -50,18 +56,31 @@ public class SubProcessWorkers {
         Map<String, Object> variables = job.getVariablesAsMap();
         String orderId = (String) variables.get("orderId");
         log.info("📦 [Inventory System] Inspecting inventory buffers for orderId: {}", orderId);
+        try {
+            MockServiceClient.InventoryReservationResponse response = mockServiceClient.reserveInventory(
+                    orderId,
+                    valueAsString(variables.get("simulateStock")),
+                    integerVariable(variables.get("inventoryForceHttpStatus"))
+            );
 
-        // Simulate out-of-stock trigger condition if variable sets request it
-        String stockStatus = "IN_STOCK";
-        if ("OUT".equalsIgnoreCase((String) variables.get("simulateStock"))) {
-            stockStatus = "OUT_OF_STOCK";
-            log.warn("⚠️ [Inventory System] Out-of-Stock simulated for orderId: {}", orderId);
+            if ("OUT_OF_STOCK".equalsIgnoreCase(response.stockStatus())) {
+                log.warn("⚠️ [Inventory System] Out-of-Stock simulated for orderId: {}", orderId);
+            }
+
+            client.newCompleteCommand(job.getKey())
+                    .variables(Map.of("stockStatus", response.stockStatus()))
+                    .send()
+                    .join();
+        } catch (RestClientResponseException exception) {
+            handleConnectorFailure(
+                    client,
+                    job,
+                    "inventory-reservation",
+                    "subProcess_InventorySystem",
+                    exception,
+                    booleanVariable(variables.get("inventoryImmediateIncidentOn5xx"))
+            );
         }
-
-        client.newCompleteCommand(job.getKey())
-                .variables(Map.of("stockStatus", stockStatus))
-                .send()
-                .join();
     }
 
     // ==========================================
@@ -71,22 +90,37 @@ public class SubProcessWorkers {
         Map<String, Object> variables = job.getVariablesAsMap();
         String orderId = (String) variables.get("orderId");
         log.info("💳 [Payment System] Executing card capture transaction for orderId: {}", orderId);
+        try {
+            MockServiceClient.PaymentChargeResponse response = mockServiceClient.chargePayment(
+                    orderId,
+                    valueAsString(variables.get("simulatePayment")),
+                    integerVariable(variables.get("paymentForceHttpStatus"))
+            );
 
-        // Simulate a failure path if requesting credit route triggers a decline error
-        if ("DECLINE".equalsIgnoreCase((String) variables.get("simulatePayment"))) {
-            log.error("❌ [Payment System] Transaction declined. Escalating GATEWAY_DECLINE boundary error trap.");
-            client.newThrowErrorCommand(job.getKey())
-                    .errorCode("GATEWAY_DECLINE")
-                    .errorMessage("Credit card transaction was explicitly declined by downstream banking network.")
+            if ("DECLINED".equalsIgnoreCase(response.outcome())) {
+                log.error("❌ [Payment System] Transaction declined. Escalating GATEWAY_DECLINE boundary error trap.");
+                client.newThrowErrorCommand(job.getKey())
+                        .errorCode("GATEWAY_DECLINE")
+                        .errorMessage(response.message())
+                        .send()
+                        .join();
+                return;
+            }
+
+            client.newCompleteCommand(job.getKey())
+                    .variables(Map.of("paymentStatus", response.paymentStatus()))
                     .send()
                     .join();
-            return;
+        } catch (RestClientResponseException exception) {
+            handleConnectorFailure(
+                    client,
+                    job,
+                    "payment-charge",
+                    "subProcess_PaymentGateway",
+                    exception,
+                    booleanVariable(variables.get("paymentImmediateIncidentOn5xx"))
+            );
         }
-
-        client.newCompleteCommand(job.getKey())
-                .variables(Map.of("paymentStatus", "SUCCESS"))
-                .send()
-                .join();
     }
 
     // ==========================================
@@ -127,5 +161,66 @@ public class SubProcessWorkers {
                 .variables(Map.of("fulfillmentStatus", "COMPLETED_STANDARD"))
                 .send()
                 .join();
+    }
+
+    private void handleConnectorFailure(JobClient client,
+                                        ActivatedJob job,
+                                        String jobType,
+                                        String processId,
+                                        RestClientResponseException exception,
+                                        Boolean immediateIncidentOverride) {
+        int statusCode = exception.getStatusCode().value();
+        String message = "%s in %s failed with HTTP %d %s. Response body: %s".formatted(
+                jobType,
+                processId,
+                statusCode,
+                exception.getStatusText(),
+                exception.getResponseBodyAsString()
+        );
+
+        if (statusCode >= 500) {
+            boolean immediateIncident = immediateIncidentOverride != null
+                    ? immediateIncidentOverride
+                    : immediateIncidentOn5xxByDefault;
+            int retries = immediateIncident ? 0 : Math.max(job.getRetries() - 1, 0);
+            log.warn("Retryable connector failure for {}. Remaining retries: {}", jobType, retries);
+            client.newFailCommand(job.getKey())
+                    .retries(retries)
+                    .errorMessage(message)
+                    .send()
+                    .join();
+            return;
+        }
+
+        log.warn("Non-retryable connector failure for {}. Setting retries to zero.", jobType);
+        client.newFailCommand(job.getKey())
+                .retries(0)
+                .errorMessage(message)
+                .send()
+                .join();
+    }
+
+    private String valueAsString(Object value) {
+        return value == null ? null : value.toString();
+    }
+
+    private Integer integerVariable(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            return Integer.parseInt(text);
+        }
+        return null;
+    }
+
+    private Boolean booleanVariable(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            return Boolean.parseBoolean(text);
+        }
+        return null;
     }
 }

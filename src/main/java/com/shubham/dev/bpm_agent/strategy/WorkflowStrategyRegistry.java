@@ -1,6 +1,7 @@
 package com.shubham.dev.bpm_agent.strategy;
 
 import org.springframework.stereotype.Component;
+
 import java.util.List;
 import java.util.Optional;
 
@@ -20,5 +21,13 @@ public class WorkflowStrategyRegistry {
         return strategies.stream()
                 .filter(strategy -> strategy.isApplicable(userPrompt))
                 .findFirst();
+    }
+
+    public List<String> getRegisteredProcessDefinitionIds() {
+        return strategies.stream()
+                .map(WorkflowContextStrategy::getProcessDefinitionId)
+                .distinct()
+                .sorted()
+                .toList();
     }
 }

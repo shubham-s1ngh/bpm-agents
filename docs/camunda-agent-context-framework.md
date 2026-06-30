@@ -30,13 +30,19 @@ Current local target:
 | Session orchestrator | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaAgentChatService.java` | Resolves workflow strategy, gates mutation intent, runs the tool loop, and routes diagnosis or retry results into the reporting path. |
 | Tool dispatch | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaToolDispatchService.java` | Extracts tool JSON from model output, dispatches allowed tools, and serializes tool results. |
 | Diagnostic tools | `src/main/java/com/shubham/dev/bpm_agent/chat/CamundaDiagnosticTools.java` | Exposes Camunda search, variable fetch, deep diagnosis, and incident-resolution tools with post-resolution verification. |
-| Report service | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java` | Converts tool payloads into grounded markdown through canonical evidence digests and report validation. |
+| Report service | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java` | Deterministically renders incident-resolution payloads and converts read-only diagnostic payloads into grounded markdown through canonical evidence digests and report validation. |
 | Evidence digest | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaEvidenceDigestService.java` | Deterministically normalizes diagnostic and incident-resolution JSON into canonical evidence. |
 | Grounding validator | `src/main/java/com/shubham/dev/bpm_agent/chat/validation/CamundaReportGroundingValidator.java` | Rejects unsupported identifiers, contradictory states, incorrect incident summaries, and leaked tool JSON. |
+| Workflow knowledge retrieval | `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java` | Indexes workflow BPMN context and consultant-managed rules into a local Spring AI vector store for read-only report enrichment. |
 | Camunda REST client | `src/main/java/com/shubham/dev/bpm_agent/camunda/CamundaOrchestrationClient.java` | Calls Camunda 8 REST v2 endpoints using Spring `RestClient` for search, diagnosis, and mutation operations. |
-| Workflow strategy contract | `src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowContextStrategy.java` | Defines process ID resolution, prompt applicability, context instructions, variable translation, and report instructions. |
+| Workflow strategy contract | `src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowContextStrategy.java` | Defines process ID resolution, prompt applicability, context instructions, variable translation, report instructions, workflow-owned incident-resolution policy defaults, and workflow-owned business identifier extraction. |
 | Strategy registry | `src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowStrategyRegistry.java` | Selects the first applicable workflow strategy for a user prompt. |
 | Current strategy | `src/main/java/com/shubham/dev/bpm_agent/strategy/OrderWorkflowStrategy.java` | Provides context for the `handleOrderId` workflow. |
+| Incident policy models | `src/main/java/com/shubham/dev/bpm_agent/chat/model/incident/*` | Holds the strategy-facing context, decision, and resolution-mode types used to express retry policy explicitly. |
+| Incident rule catalog | `src/main/java/com/shubham/dev/bpm_agent/strategy/persistence/*` | Stores workflow incident-resolution rules in a Flyway-managed relational schema so a future UI can manage them safely. |
+| Rule admin API | `src/main/java/com/shubham/dev/bpm_agent/strategy/admin/IncidentResolutionRuleAdminController.java` | Exposes CRUD endpoints for consultant-managed rule editing without bypassing validation or normalization. |
+| BPMN draft assistant | `src/main/java/com/shubham/dev/bpm_agent/strategy/admin/BpmnIncidentRuleSuggestionService.java` | Parses uploaded BPMN XML, extracts candidate integration points, and asks the configured LLM for advisory rule drafts before a consultant saves anything. |
+| Mock connector APIs | `src/main/java/com/shubham/dev/bpm_agent/camunda/mock/*` | Provides local HTTP endpoints used by workers to simulate transient server errors and non-retryable client errors. |
 
 ## Current Diagnostic Tools
 
@@ -138,7 +144,8 @@ Usage boundary:
 
 - This is a mutation tool.
 - It is the safer choice when the agent knows the process instance but not a fresh current incident key.
-- The tool now re-queries incidents after resolution and returns failure if active incidents still remain.
+- The tool now traverses the root process instance and its child process instances, resolves active incidents on each affected process instance, then re-queries the full process tree after resolution.
+- It returns failure if active incidents still remain anywhere in that process tree.
 
 ## Required Agent Resolution Flow
 
@@ -172,6 +179,7 @@ Required strategy content:
 - Variable translations where business wording maps to Camunda values.
 - BPMN context describing major tasks, gateways, call activities, incidents, and expected wait states.
 - Report rules for how to interpret and present runtime evidence.
+- Incident-resolution policy describing whether retry is supported, which mutation mode is preferred, and when retry should be blocked or skipped.
 
 Recommended strategy metadata per workflow:
 
@@ -184,12 +192,67 @@ Recommended strategy metadata per workflow:
 | `importantVariables` | `category`, `stockStatus`, `paymentStatus` | Defines variables that affect path interpretation. |
 | `pathRules` | `category=1` means advanced track | Maps variable state to BPMN paths. |
 | `incidentRules` | Use exact `errorType` and `errorMessage` | Prevents invented error summaries. |
+| `incidentResolutionPolicy` | Prefer process-instance retry, block deployment mismatches | Keeps workflow-specific mutation rules out of generic orchestration. |
 
 ## Current `handleOrderId` Context
 
 Current strategy:
 
 - `OrderWorkflowStrategy`
+
+Current incident policy seam:
+
+- The strategy now prefers process-instance incident resolution for order workflows.
+- The strategy now applies ordered incident rules instead of a single hardcoded incident predicate.
+- The strategy can explicitly block `CALLED_ELEMENT_ERROR` incidents that look like called-process deployment mismatches.
+- The strategy can allow retry for `JOB_NO_RETRIES` incidents whose grounded error message shows a transient HTTP `500` from `inventory-reservation` or `payment-charge`.
+- The strategy can block retry for `JOB_NO_RETRIES` incidents whose grounded error message shows payment HTTP `400 Bad Request`.
+- The strategy can explicitly return `NO_ACTION` when no active incident evidence is present.
+- The main orchestration flow now consults strategy policy for both single-order and bulk-order retry decisions before sending mutation commands.
+- Order strategy rule matching now covers the root order workflow plus relevant subprocess IDs so consultant-managed rules can target child-process incidents directly.
+
+Current rule storage:
+
+- Incident-resolution rules are now persisted in the `incident_resolution_rule` table.
+- Flyway manages the rule schema and starts the consultant-managed catalog clean for new environments.
+- `OrderWorkflowStrategy` now loads persisted rules first and falls back to Java defaults only when no persisted rules are returned.
+- The default local database is file-backed H2, which preserves consultant-managed rules across restarts while keeping a migration path to PostgreSQL or another production database.
+- A consultant-facing admin UI is now available at `http://localhost:8081/admin/incident-rules/index.html`.
+- The admin UI uses `/api/admin/incident-resolution-rules` for CRUD operations and `/api/admin/incident-resolution-rules/metadata` for workflow and resolution-mode choices.
+- The same UI now uses `/api/admin/incident-resolution-rules/suggestions` for BPMN upload and advisory draft generation.
+- Admin writes are normalized before persistence so error types stay canonical, HTTP status codes stay numeric, and free-text message tokens remain deterministic for runtime matching.
+- BPMN-assisted drafts remain unsaved until a consultant explicitly loads one into the editor and presses save, which keeps the existing agent behavior unchanged until human review is complete.
+- Rule CRUD operations now refresh the workflow knowledge vector index so read-only reporting uses the latest consultant-managed policy context.
+
+Current bulk retry support:
+
+- The order workflow now supports deterministic bulk retry when one prompt contains multiple `orderId` values and explicit retry intent.
+- The orchestrator searches each `orderId` independently, diagnoses the active process instance when found, evaluates the `OrderWorkflowStrategy` policy per order, and only then retries or blocks that order.
+- This is currently order-workflow-specific and does not yet expose a generic batch tool contract for every workflow strategy.
+
+## Local Mock Failure Harness
+
+To make retry policy testable in the current order workflow:
+
+- `inventory-reservation` now calls `POST /api/mock-services/inventory/reserve`
+- `payment-charge` now calls `POST /api/mock-services/payment/charge`
+- Both endpoints return a random HTTP `500` one out of five requests to simulate transient infrastructure failures.
+- `payment-charge` returns HTTP `400` when the process variable `simulatePayment=BAD_REQUEST`.
+- `payment-charge` returns an application-level `DECLINED` outcome when `simulatePayment=DECLINE`; the worker maps that to the existing BPMN error path instead of an incident retry flow.
+- You can force deterministic worker failures for testing with:
+  - `inventoryForceHttpStatus`
+  - `paymentForceHttpStatus`
+- You can force an immediate incident on the first worker-side HTTP `500` with:
+  - process variable `inventoryImmediateIncidentOn5xx=true`
+  - process variable `paymentImmediateIncidentOn5xx=true`
+  - or config `app.mock-services.immediate-incident-on-5xx=true`
+
+Current worker behavior:
+
+- HTTP `500+` responses fail the job with remaining retries decremented, which makes the incident retryable.
+- In immediate-incident test mode, HTTP `500+` responses fail the job with retries set to `0`, so Camunda raises the incident on the first failure.
+- HTTP `400-499` responses fail the job with retries set to `0`, which makes the incident non-retryable until the input or configuration is corrected.
+- The worker error message includes job type, process ID, and HTTP status so strategy rules can classify the incident without invented data.
 
 Canonical process:
 
@@ -288,6 +351,10 @@ The agent may say an activity is pending only when Camunda element state and BPM
 
 The agent must not treat mutation command acceptance as business success unless the post-resolution Camunda evidence confirms the incident is gone.
 
+Vector-retrieved workflow context may help the LLM explain likely BPMN meaning or policy context, but it must never replace Camunda runtime evidence when reporting instance state, incidents, variables, or child-process outcomes.
+
+For read-only diagnostics, the report should distinguish the root instance's direct incident count from the full process-tree incident count when child subprocesses carry the active incident.
+
 ## Target Tooling Improvements
 
 The current code is a useful proof of concept. To support tens of workflows rigorously, these changes should be prioritized:
@@ -301,6 +368,7 @@ The current code is a useful proof of concept. To support tens of workflows rigo
 7. Return structured diagnosis DTOs instead of raw `Map<String, Object>` where practical.
 8. Add strategy-aware `processId` filtering to process search so variable collisions across workflows are prevented at the tool level.
 9. Add tests for process resolution, variable alias normalization, mutation routing, and no-hallucination output rules.
+10. Keep vector-store knowledge limited to static workflow/rule context unless a separate, explicitly grounded retrieval domain is introduced.
 
 ## Example Intended User Flow
 

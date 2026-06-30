@@ -1,14 +1,18 @@
 package com.shubham.dev.bpm_agent.chat.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shubham.dev.bpm_agent.chat.model.CamundaEvidenceSnapshot;
 import com.shubham.dev.bpm_agent.chat.validation.CamundaReportGroundingValidator;
 import com.shubham.dev.bpm_agent.strategy.WorkflowContextStrategy;
+import com.shubham.dev.bpm_agent.strategy.retrieval.WorkflowKnowledgeVectorStoreService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 import java.util.Optional;
@@ -25,16 +29,22 @@ public class CamundaDiagnosticReportService {
 
     private static final Logger log = LoggerFactory.getLogger(CamundaDiagnosticReportService.class);
 
+    private final ObjectMapper objectMapper;
     private final ChatClient.Builder chatClientBuilder;
     private final CamundaEvidenceDigestService evidenceDigestService;
     private final CamundaReportGroundingValidator groundingValidator;
+    private final WorkflowKnowledgeVectorStoreService workflowKnowledgeVectorStoreService;
 
-    public CamundaDiagnosticReportService(ChatClient.Builder chatClientBuilder,
+    public CamundaDiagnosticReportService(ObjectMapper objectMapper,
+                                          ChatClient.Builder chatClientBuilder,
                                           CamundaEvidenceDigestService evidenceDigestService,
-                                          CamundaReportGroundingValidator groundingValidator) {
+                                          CamundaReportGroundingValidator groundingValidator,
+                                          WorkflowKnowledgeVectorStoreService workflowKnowledgeVectorStoreService) {
+        this.objectMapper = objectMapper;
         this.chatClientBuilder = chatClientBuilder;
         this.evidenceDigestService = evidenceDigestService;
         this.groundingValidator = groundingValidator;
+        this.workflowKnowledgeVectorStoreService = workflowKnowledgeVectorStoreService;
     }
 
     public String generateReport(String conversationId,
@@ -43,8 +53,13 @@ public class CamundaDiagnosticReportService {
                                  Optional<WorkflowContextStrategy> strategyOpt) {
         CamundaEvidenceSnapshot snapshot = evidenceDigestService.buildSnapshot(diagnosticPayload);
         boolean incidentResolutionPayload = isIncidentResolutionPayload(snapshot);
+        if (incidentResolutionPayload) {
+            return renderDeterministicIncidentResolutionReport(diagnosticPayload);
+        }
+
         String dynamicReportContract = strategyOpt.map(WorkflowContextStrategy::generateReportStructuringInstructions)
                 .orElse("");
+        String retrievedWorkflowKnowledge = workflowKnowledgeVectorStoreService.fetchRelevantContext(userPrompt, strategyOpt);
         String stableReportContract = buildStableReportContract(incidentResolutionPayload);
 
         ChatClient reportChatClient = chatClientBuilder
@@ -69,6 +84,7 @@ public class CamundaDiagnosticReportService {
                 - `ACTIVE` means running or waiting.
                 - `COMPLETED` means finished successfully and is not currently running.
                 - `TERMINATED` means stopped or cancelled.
+                - Distinguish the root process instance's direct incident count from the total process-tree incident count when child subprocesses have active incidents.
                 - Include remediation only when Camunda returned active incidents.
                 - Inspect child process evidence recursively when explaining active child processes.
                 - Prefer quoting the exact incident error text from the evidence digest when incidents exist.
@@ -84,12 +100,15 @@ public class CamundaDiagnosticReportService {
 
                 %s
 
+                RETRIEVED WORKFLOW KNOWLEDGE:
+                %s
+
                 STABLE REPORT CONTRACT:
                 %s
 
                 WORKFLOW-SPECIFIC INTERPRETATION RULES:
                 %s
-                """, userPrompt, snapshot.digest(), groundingRules, stableReportContract, dynamicReportContract);
+                """, userPrompt, snapshot.digest(), groundingRules, retrievedWorkflowKnowledge, stableReportContract, dynamicReportContract);
 
         String generatedReport = "";
         for (int attempt = 1; attempt <= 2; attempt++) {
@@ -168,6 +187,7 @@ public class CamundaDiagnosticReportService {
                 - Use bullets, not tables.
                 - Use one bullet per fact.
                 - Use the same heading names exactly as written above.
+                - Under `## Process Instance Overview`, include both the direct root incident count and the total process-tree incident count when the evidence digest provides them.
                 - Do not add sections such as `Camunda State Semantics`, `Process Overview`, `Routing Interpretation`, or `Remediation Action`.
                 - Explain routing facts inline under the relevant section instead of creating a separate heading.
                 - Include incident state explicitly for every incident shown.
@@ -176,6 +196,84 @@ public class CamundaDiagnosticReportService {
 
     boolean isIncidentResolutionPayload(CamundaEvidenceSnapshot snapshot) {
         return snapshot.digest().contains("Operation type: incident resolution");
+    }
+
+    String renderDeterministicIncidentResolutionReport(String diagnosticPayload) {
+        try {
+            JsonNode payload = objectMapper.readTree(diagnosticPayload);
+            JsonNode postResolutionDiagnostics = payload.path("postResolutionDiagnostics");
+            JsonNode rootDiagnostic = postResolutionDiagnostics.isObject() ? postResolutionDiagnostics : payload;
+            JsonNode processInstance = rootDiagnostic.path("processInstance");
+
+            StringBuilder report = new StringBuilder("# Diagnostic Report\n\n");
+            report.append("## Resolution Outcome\n");
+            appendBullet(report, "Resolution Status", evidenceDigestService.firstText(payload, "status"));
+            appendBullet(report, "Resolution Command Attempts", evidenceDigestService.firstText(payload, "resolutionCommandAttempts"));
+            appendBullet(report, "Verification Checks", evidenceDigestService.firstText(payload, "verificationChecks"));
+
+            String policyMode = evidenceDigestService.firstText(payload, "policyMode");
+            if (StringUtils.hasText(policyMode)) {
+                appendBullet(report, "Policy Mode", policyMode);
+            }
+
+            String message = evidenceDigestService.firstText(payload, "message", "error");
+            if (StringUtils.hasText(message)) {
+                appendBullet(report, "Resolution Message", message);
+            }
+
+            String policyReason = evidenceDigestService.firstText(payload, "policyReason");
+            if (StringUtils.hasText(policyReason)) {
+                appendBullet(report, "Policy Reason", policyReason);
+            }
+
+            String policyGuidance = evidenceDigestService.firstText(payload, "policyGuidance");
+            if (StringUtils.hasText(policyGuidance)) {
+                appendBullet(report, "Policy Guidance", policyGuidance);
+            }
+
+            JsonNode remainingIncidents = payload.path("remainingIncidents");
+            appendBullet(report, "Remaining Active Incidents",
+                    remainingIncidents.isArray() ? String.valueOf(remainingIncidents.size()) : "0");
+            report.append('\n');
+
+            report.append("## Process Instance Overview\n");
+            appendBullet(report, "Process Instance Key",
+                    evidenceDigestService.firstText(processInstance, "processInstanceKey", "key",
+                            "rootProcessInstanceKey"));
+            appendBullet(report, "Process Definition ID",
+                    evidenceDigestService.firstText(processInstance, "processDefinitionId"));
+            appendBullet(report, "State", evidenceDigestService.firstText(processInstance, "state"));
+            appendBullet(report, "Incident Count",
+                    String.valueOf(rootDiagnostic.path("activeIncidents").isArray()
+                            ? rootDiagnostic.path("activeIncidents").size()
+                            : 0));
+            report.append('\n');
+
+            report.append("## Active Incidents Before Resolution\n");
+            JsonNode incidentsBeforeResolution = payload.path("incidentsBeforeResolution");
+            if (!incidentsBeforeResolution.isArray()) {
+                incidentsBeforeResolution = payload.path("resolvedIncidents");
+            }
+            if (!incidentsBeforeResolution.isArray()) {
+                incidentsBeforeResolution = payload.path("incidents");
+            }
+            appendIncidentList(report, incidentsBeforeResolution);
+            report.append('\n');
+
+            if (remainingIncidents.isArray() && !remainingIncidents.isEmpty()) {
+                report.append("## Remaining Active Incidents\n");
+                appendIncidentList(report, remainingIncidents);
+                report.append('\n');
+            }
+
+            appendVariablesSection(report, rootDiagnostic.path("runtimeVariables"));
+            appendFlowElementsSection(report, rootDiagnostic.path("activeSteps"));
+            appendChildProcessesSection(report, rootDiagnostic.path("childProcessDiagnostics"));
+
+            return report.toString().trim();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to render deterministic incident report", e);
+        }
     }
 
     private String stripMarkdownFence(String modelOutput) {
@@ -188,5 +286,110 @@ public class CamundaDiagnosticReportService {
             }
         }
         return modelOutput;
+    }
+
+    private void appendIncidentList(StringBuilder report, JsonNode incidents) {
+        if (!incidents.isArray() || incidents.isEmpty()) {
+            report.append("- No incidents were returned by Camunda for this section.\n");
+            return;
+        }
+
+        for (JsonNode incident : incidents) {
+            appendBullet(report, "Incident Key", evidenceDigestService.firstText(incident, "key", "incidentKey"));
+            appendBullet(report, "Process Definition ID", evidenceDigestService.firstText(incident, "processDefinitionId"));
+            appendBullet(report, "State", evidenceDigestService.firstText(incident, "state"));
+            appendBullet(report, "Error Type", evidenceDigestService.firstText(incident, "errorType"));
+            appendBullet(report, "Error Message", evidenceDigestService.firstText(incident, "errorMessage", "message"));
+            report.append('\n');
+        }
+    }
+
+    private void appendVariablesSection(StringBuilder report, JsonNode variables) {
+        if (!variables.isArray() || variables.isEmpty()) {
+            return;
+        }
+
+        report.append("## Variables\n");
+        for (JsonNode variable : variables) {
+            report.append("- **")
+                    .append(evidenceDigestService.firstText(variable, "name", "variableName"))
+                    .append(":** ")
+                    .append(evidenceDigestService.firstText(variable, "value", "variableValue"))
+                    .append('\n');
+        }
+        report.append('\n');
+    }
+
+    private void appendFlowElementsSection(StringBuilder report, JsonNode steps) {
+        if (!steps.isArray() || steps.isEmpty()) {
+            return;
+        }
+
+        report.append("## Flow Elements\n");
+        for (JsonNode step : steps) {
+            report.append("- **Element ")
+                    .append(evidenceDigestService.firstText(step, "elementId", "flowNodeId"))
+                    .append(" / ")
+                    .append(evidenceDigestService.firstText(step, "elementName", "flowNodeName", "name"))
+                    .append(" / ")
+                    .append(evidenceDigestService.firstText(step, "elementType", "flowNodeType", "type"))
+                    .append(" / ")
+                    .append(evidenceDigestService.firstText(step, "state"))
+                    .append("**\n");
+        }
+        report.append('\n');
+    }
+
+    private void appendChildProcessesSection(StringBuilder report, JsonNode children) {
+        if (!children.isArray() || children.isEmpty()) {
+            return;
+        }
+
+        report.append("## Child Processes\n");
+        for (JsonNode child : children) {
+            appendChildProcess(report, child, 0);
+            report.append('\n');
+        }
+    }
+
+    private void appendChildProcess(StringBuilder report, JsonNode childDiagnostic, int depth) {
+        JsonNode processInstance = childDiagnostic.path("processInstance");
+        String indent = "  ".repeat(depth);
+        String nestedIndent = "  ".repeat(depth + 1);
+        report.append(indent)
+                .append("- **Child Instance Key:** ")
+                .append(evidenceDigestService.firstText(processInstance, "processInstanceKey", "key"))
+                .append('\n');
+        report.append(nestedIndent)
+                .append("- **Process Definition ID:** ")
+                .append(evidenceDigestService.firstText(processInstance, "processDefinitionId"))
+                .append('\n');
+        report.append(nestedIndent)
+                .append("- **State:** ")
+                .append(evidenceDigestService.firstText(processInstance, "state"))
+                .append('\n');
+        report.append(nestedIndent)
+                .append("- **Incident Count:** ")
+                .append(childDiagnostic.path("activeIncidents").isArray()
+                        ? childDiagnostic.path("activeIncidents").size()
+                        : 0)
+                .append('\n');
+
+        JsonNode grandchildren = childDiagnostic.path("childProcessDiagnostics");
+        if (grandchildren.isArray()) {
+            for (JsonNode grandchild : grandchildren) {
+                appendChildProcess(report, grandchild, depth + 1);
+            }
+        }
+    }
+
+    private void appendBullet(StringBuilder report, String label, String value) {
+        report.append("- **").append(label).append(":** ");
+        if (StringUtils.hasText(value)) {
+            report.append(value);
+        } else {
+            report.append("not returned by Camunda");
+        }
+        report.append('\n');
     }
 }

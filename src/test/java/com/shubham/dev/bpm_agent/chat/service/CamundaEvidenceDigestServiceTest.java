@@ -51,6 +51,8 @@ class CamundaEvidenceDigestServiceTest {
 
         assertTrue(snapshot.digest().contains("Process definition ID: handleOrderId"));
         assertTrue(snapshot.digest().contains("Process definition name: handle order"));
+        assertTrue(snapshot.digest().contains("Direct incident count on root instance: 0"));
+        assertTrue(snapshot.digest().contains("Total process-tree incident count: 1"));
         assertTrue(snapshot.digest().contains("Process definition ID: advanceCategory_processId"));
         assertEquals("ACTIVE", snapshot.instancesByKey().get("2251799813824980").state());
         assertEquals(1, snapshot.instancesByKey().get("2251799813824991").incidentCount());
@@ -153,6 +155,8 @@ class CamundaEvidenceDigestServiceTest {
                   "processInstanceKey": 2251799813950818,
                   "status": "NO_ACTION",
                   "message": "No active incidents were returned by Camunda for processInstanceKey 2251799813950818.",
+                  "policyReason": "No active incidents were supplied for workflow handleOrderId.",
+                  "policyGuidance": "No retry action was selected because Camunda evidence did not show an active incident for this workflow instance.",
                   "resolutionCommandAttempts": 0,
                   "verificationChecks": 1,
                   "postResolutionDiagnostics": {
@@ -194,6 +198,8 @@ class CamundaEvidenceDigestServiceTest {
         CamundaEvidenceSnapshot snapshot = evidenceDigestService.buildSnapshot(payload);
 
         assertTrue(snapshot.digest().contains("Operation type: incident resolution"));
+        assertTrue(snapshot.digest().contains("Policy reason: No active incidents were supplied for workflow handleOrderId."));
+        assertTrue(snapshot.digest().contains("Policy guidance: No retry action was selected because Camunda evidence did not show an active incident for this workflow instance."));
         assertTrue(snapshot.digest().contains("Resolution command attempts: 0"));
         assertTrue(snapshot.digest().contains("Verification checks: 1"));
         assertTrue(snapshot.digest().contains("Process definition ID: handleOrderId"));

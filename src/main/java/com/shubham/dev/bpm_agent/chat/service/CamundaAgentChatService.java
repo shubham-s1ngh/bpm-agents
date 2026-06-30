@@ -3,6 +3,9 @@ package com.shubham.dev.bpm_agent.chat.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.shubham.dev.bpm_agent.chat.CamundaDiagnosticTools;
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionContext;
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionDecision;
+import com.shubham.dev.bpm_agent.chat.model.incident.IncidentResolutionMode;
 import com.shubham.dev.bpm_agent.strategy.WorkflowContextStrategy;
 import com.shubham.dev.bpm_agent.strategy.WorkflowStrategyRegistry;
 import org.slf4j.Logger;
@@ -18,12 +21,16 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.LinkedHashSet;
 
 /**
  * Orchestrates the end-to-end chat session for Camunda diagnostics.
@@ -88,10 +95,27 @@ public class CamundaAgentChatService {
                 return resolveIncidentByKeyReport(conversationId, prompt, strategyOpt, directIncidentKey.get());
             }
 
+            if (allowRetryIncident && isBulkBusinessIdentifierRetryPrompt(prompt, strategyOpt)) {
+                WorkflowContextStrategy strategy = strategyOpt.orElseThrow();
+                List<String> requestedBusinessIdentifiers = strategy.extractBusinessIdentifiers(prompt);
+                if (requestedBusinessIdentifiers.size() > 1) {
+                    log.info("[BULK MUTATION ROUTE] Explicit retry intent with {} {} identifiers: {}",
+                            requestedBusinessIdentifiers.size(),
+                            strategy.primaryBusinessIdentifierVariable(),
+                            requestedBusinessIdentifiers);
+                    return handleBulkBusinessIdentifierIncidentRetry(conversationId, prompt, strategy, requestedBusinessIdentifiers);
+                }
+            }
+
             Optional<Long> directProcessInstanceKey = extractRequestedProcessInstanceKey(prompt, allowRetryIncident);
             if (allowRetryIncident && directProcessInstanceKey.isPresent()) {
                 log.info("[DIRECT MUTATION ROUTE] Explicit retry intent with processInstanceKey: {}", directProcessInstanceKey.get());
-                return resolveIncidentsByProcessInstanceReport(conversationId, prompt, strategyOpt, String.valueOf(directProcessInstanceKey.get()));
+                return resolveIncidentsByProcessInstanceWithPolicyReport(
+                        conversationId,
+                        prompt,
+                        strategyOpt,
+                        directProcessInstanceKey.get()
+                );
             }
 
             if (directProcessInstanceKey.isPresent()) {
@@ -323,6 +347,151 @@ public class CamundaAgentChatService {
         }
     }
 
+    private String handleBulkBusinessIdentifierIncidentRetry(String conversationId,
+                                                             String prompt,
+                                                             WorkflowContextStrategy strategy,
+                                                             List<String> businessIdentifiers) {
+        List<BulkOrderRetryResult> results = new ArrayList<>();
+        String selectedProcessId = strategy.getProcessDefinitionId();
+        String identifierVariable = strategy.primaryBusinessIdentifierVariable();
+
+        for (String businessIdentifier : businessIdentifiers) {
+            try {
+                String searchPayload = toolDispatchService.serialize(
+                        diagnosticTools.searchProcessInstances(identifierVariable, businessIdentifier)
+                );
+                Optional<Long> activeProcessInstanceKey = extractActiveProcessInstanceKey(searchPayload);
+                if (activeProcessInstanceKey.isEmpty()) {
+                    results.add(BulkOrderRetryResult.notFound(businessIdentifier));
+                    continue;
+                }
+
+                String diagnosticPayload = toolDispatchService.serialize(
+                        diagnosticTools.diagnoseProcessInstance(activeProcessInstanceKey.get())
+                );
+                JsonNode diagnostic = objectMapper.readTree(diagnosticPayload);
+                List<Map<String, Object>> activeIncidents = collectActiveIncidents(diagnostic);
+
+                IncidentResolutionContext resolutionContext = new IncidentResolutionContext(
+                        prompt,
+                        selectedProcessId,
+                        collectProcessDefinitionIds(diagnostic),
+                        activeProcessInstanceKey.get(),
+                        activeIncidents,
+                        objectMapper.convertValue(diagnostic, Map.class)
+                );
+
+                IncidentResolutionDecision decision = strategy.buildResolutionDecision(resolutionContext);
+
+                if (!decision.allowed()) {
+                    results.add(BulkOrderRetryResult.fromDecision(businessIdentifier, activeProcessInstanceKey.get(), decision));
+                    continue;
+                }
+
+                if (decision.mode() == IncidentResolutionMode.BY_INCIDENT_KEY) {
+                    Optional<String> incidentKey = activeIncidents.stream()
+                            .map(incident -> firstNonBlank(
+                                    String.valueOf(incident.getOrDefault("key", "")),
+                                    String.valueOf(incident.getOrDefault("incidentKey", ""))
+                            ))
+                            .filter(StringUtils::hasText)
+                            .findFirst();
+
+                    if (incidentKey.isEmpty()) {
+                        results.add(BulkOrderRetryResult.failed(
+                                businessIdentifier,
+                                "Workflow strategy requested incident-key resolution, but no active incident key was available."
+                        ));
+                        continue;
+                    }
+
+                    String mutationPayload = resolveIncidentByKey(incidentKey.get());
+                    JsonNode mutation = objectMapper.readTree(mutationPayload);
+                    results.add(BulkOrderRetryResult.fromMutation(businessIdentifier, activeProcessInstanceKey.get(), mutation, decision));
+                    continue;
+                }
+
+                String mutationPayload = resolveIncidentsByProcessInstance(String.valueOf(activeProcessInstanceKey.get()));
+                JsonNode mutation = objectMapper.readTree(mutationPayload);
+                results.add(BulkOrderRetryResult.fromMutation(businessIdentifier, activeProcessInstanceKey.get(), mutation, decision));
+            } catch (Exception exception) {
+                results.add(BulkOrderRetryResult.failed(businessIdentifier, exception.getMessage()));
+            }
+        }
+
+        return buildBulkBusinessIdentifierRetryReport(identifierVariable, results);
+    }
+
+    private String buildBulkBusinessIdentifierRetryReport(String identifierVariable, List<BulkOrderRetryResult> results) {
+        long succeeded = results.stream().filter(result -> "SUCCESS".equals(result.status())).count();
+        long noAction = results.stream().filter(result -> "NO_ACTION".equals(result.status())).count();
+        long blocked = results.stream().filter(result -> "BLOCKED".equals(result.status())).count();
+        long failed = results.stream().filter(result -> "FAILED".equals(result.status())).count();
+        long notFound = results.stream().filter(result -> "NOT_FOUND".equals(result.status())).count();
+
+        StringBuilder report = new StringBuilder();
+        report.append("# Bulk Incident Retry Report").append('\n').append('\n');
+        report.append("## Summary").append('\n');
+        report.append("- Requested ").append(identifierVariable).append(" count: ").append(results.size()).append('\n');
+        report.append("- Successful retries: ").append(succeeded).append('\n');
+        report.append("- No-action results: ").append(noAction).append('\n');
+        report.append("- Blocked retries: ").append(blocked).append('\n');
+        report.append("- Failed retries: ").append(failed).append('\n');
+        report.append("- Identifiers not found: ").append(notFound).append('\n').append('\n');
+        report.append("## Per Identifier").append('\n');
+
+        for (BulkOrderRetryResult result : results) {
+            report.append("- ").append(identifierVariable).append(": ").append(result.orderId()).append('\n');
+            if (result.processInstanceKey() != null) {
+                report.append("  Process instance key: ").append(result.processInstanceKey()).append('\n');
+            }
+            report.append("  Status: ").append(result.status()).append('\n');
+            if (StringUtils.hasText(result.policyReason())) {
+                report.append("  Policy reason: ").append(result.policyReason()).append('\n');
+            }
+            if (StringUtils.hasText(result.policyMode())) {
+                report.append("  Policy mode: ").append(result.policyMode()).append('\n');
+            }
+            if (StringUtils.hasText(result.message())) {
+                report.append("  Message: ").append(result.message()).append('\n');
+            }
+            if (result.resolutionCommandAttempts() != null) {
+                report.append("  Resolution command attempts: ").append(result.resolutionCommandAttempts()).append('\n');
+            }
+            if (result.verificationChecks() != null) {
+                report.append("  Verification checks: ").append(result.verificationChecks()).append('\n');
+            }
+        }
+
+        return report.toString();
+    }
+
+    private List<Map<String, Object>> collectActiveIncidents(JsonNode diagnostic) {
+        List<Map<String, Object>> activeIncidents = new ArrayList<>();
+        collectActiveIncidents(diagnostic, activeIncidents);
+        return List.copyOf(activeIncidents);
+    }
+
+    private void collectActiveIncidents(JsonNode diagnostic, List<Map<String, Object>> activeIncidents) {
+        if (diagnostic == null || !diagnostic.isObject()) {
+            return;
+        }
+
+        JsonNode incidents = diagnostic.path("activeIncidents");
+        if (incidents.isArray()) {
+            for (JsonNode incident : incidents) {
+                activeIncidents.add(objectMapper.convertValue(incident, Map.class));
+            }
+        }
+
+        JsonNode childDiagnostics = diagnostic.path("childProcessDiagnostics");
+        if (childDiagnostics.isArray()) {
+            for (JsonNode childDiagnostic : childDiagnostics) {
+                collectActiveIncidents(childDiagnostic, activeIncidents);
+            }
+        }
+    }
+
     String handleSearchProcessInstancesResult(String toolResultPayload,
                                               boolean allowRetryIncident,
                                               String conversationId,
@@ -335,7 +504,12 @@ public class CamundaAgentChatService {
 
         if (allowRetryIncident) {
             log.info("[DETERMINISTIC MUTATION ROUTE] Explicit retry intent with active processInstanceKey isolated from search: {}", activeProcessInstanceKey.get());
-            return resolveIncidentsByProcessInstanceReport(conversationId, prompt, strategyOpt, String.valueOf(activeProcessInstanceKey.get()));
+            return resolveIncidentsByProcessInstanceWithPolicyReport(
+                    conversationId,
+                    prompt,
+                    strategyOpt,
+                    activeProcessInstanceKey.get()
+            );
         }
 
         log.info("[DETERMINISTIC DIAGNOSTIC ROUTE] Active processInstanceKey isolated: {}", activeProcessInstanceKey.get());
@@ -365,6 +539,12 @@ public class CamundaAgentChatService {
                 || normalized.matches(".*\\bretry\\b.*\\bincident\\b.*");
     }
 
+    private boolean isBulkBusinessIdentifierRetryPrompt(String prompt, Optional<WorkflowContextStrategy> strategyOpt) {
+        return strategyOpt
+                .map(strategy -> strategy.extractBusinessIdentifiers(prompt).size() > 1)
+                .orElse(false);
+    }
+
     private String resolveIncidentByKeyReport(String conversationId,
                                               String prompt,
                                               Optional<WorkflowContextStrategy> strategyOpt,
@@ -379,5 +559,178 @@ public class CamundaAgentChatService {
                                                            String processInstanceKey) {
         String mutationPayload = resolveIncidentsByProcessInstance(processInstanceKey);
         return diagnosticReportService.generateReport(conversationId, prompt, mutationPayload, strategyOpt);
+    }
+
+    private String resolveIncidentsByProcessInstanceWithPolicyReport(String conversationId,
+                                                                     String prompt,
+                                                                     Optional<WorkflowContextStrategy> strategyOpt,
+                                                                     Long processInstanceKey) {
+        if (strategyOpt.isEmpty()) {
+            return resolveIncidentsByProcessInstanceReport(conversationId, prompt, Optional.empty(), String.valueOf(processInstanceKey));
+        }
+
+        try {
+            String diagnosticPayload = toolDispatchService.serialize(diagnosticTools.diagnoseProcessInstance(processInstanceKey));
+            JsonNode diagnostic = objectMapper.readTree(diagnosticPayload);
+            List<Map<String, Object>> activeIncidents = collectActiveIncidents(diagnostic);
+
+            WorkflowContextStrategy strategy = strategyOpt.get();
+            IncidentResolutionContext resolutionContext = new IncidentResolutionContext(
+                    prompt,
+                    strategy.getProcessDefinitionId(),
+                    collectProcessDefinitionIds(diagnostic),
+                    processInstanceKey,
+                    activeIncidents,
+                    objectMapper.convertValue(diagnostic, Map.class)
+            );
+
+            IncidentResolutionDecision decision = strategy.buildResolutionDecision(resolutionContext);
+            if (!decision.allowed()) {
+                String policyPayload = objectMapper.writeValueAsString(
+                        buildSingleProcessResolutionPolicyPayload(processInstanceKey, activeIncidents, diagnostic, decision)
+                );
+                return diagnosticReportService.generateReport(conversationId, prompt, policyPayload, strategyOpt);
+            }
+
+            if (decision.mode() == IncidentResolutionMode.BY_INCIDENT_KEY) {
+                Optional<String> incidentKey = activeIncidents.stream()
+                        .map(incident -> firstNonBlank(
+                                String.valueOf(incident.getOrDefault("key", "")),
+                                String.valueOf(incident.getOrDefault("incidentKey", ""))
+                        ))
+                        .filter(StringUtils::hasText)
+                        .findFirst();
+
+                if (incidentKey.isPresent()) {
+                    return resolveIncidentByKeyReport(conversationId, prompt, strategyOpt, incidentKey.get());
+                }
+                String policyPayload = objectMapper.writeValueAsString(
+                        buildSingleProcessResolutionPolicyPayload(
+                                processInstanceKey,
+                                activeIncidents,
+                                diagnostic,
+                                IncidentResolutionDecision.blocked(
+                                "Workflow strategy requested incident-key resolution, but no active incident key was available.",
+                                "Retry is blocked because the workflow policy required an incident key and the active incident payload did not provide one."
+                                )
+                        )
+                );
+                return diagnosticReportService.generateReport(conversationId, prompt, policyPayload, strategyOpt);
+            }
+
+            return resolveIncidentsByProcessInstanceReport(conversationId, prompt, strategyOpt, String.valueOf(processInstanceKey));
+        } catch (Exception exception) {
+            return "Failed to evaluate workflow retry policy before incident resolution: " + exception.getMessage();
+        }
+    }
+
+    private Map<String, Object> buildSingleProcessResolutionPolicyPayload(Long processInstanceKey,
+                                                                          List<Map<String, Object>> activeIncidents,
+                                                                          JsonNode diagnostic,
+                                                                          IncidentResolutionDecision decision) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("processInstanceKey", processInstanceKey);
+        payload.put("status", decision.mode().name());
+        payload.put("message", firstNonBlank(decision.userFacingGuidance(), decision.reason()));
+        payload.put("policyReason", decision.reason());
+        payload.put("policyGuidance", decision.userFacingGuidance());
+        payload.put("resolutionCommandAttempts", 0);
+        payload.put("verificationChecks", 0);
+        payload.put("incidentsBeforeResolution", activeIncidents);
+        payload.put("remainingIncidents", decision.mode() == IncidentResolutionMode.NO_ACTION ? List.of() : activeIncidents);
+        payload.put("postResolutionDiagnostics", objectMapper.convertValue(diagnostic, Map.class));
+        return payload;
+    }
+
+    private Set<String> collectProcessDefinitionIds(JsonNode diagnostic) {
+        Set<String> processDefinitionIds = new LinkedHashSet<>();
+        collectProcessDefinitionIds(diagnostic, processDefinitionIds);
+        return Set.copyOf(processDefinitionIds);
+    }
+
+    private void collectProcessDefinitionIds(JsonNode diagnostic, Set<String> processDefinitionIds) {
+        if (diagnostic == null || !diagnostic.isObject()) {
+            return;
+        }
+
+        String processDefinitionId = diagnostic.path("processInstance").path("processDefinitionId").asText("");
+        if (StringUtils.hasText(processDefinitionId)) {
+            processDefinitionIds.add(processDefinitionId);
+        }
+
+        JsonNode childDiagnostics = diagnostic.path("childProcessDiagnostics");
+        if (childDiagnostics.isArray()) {
+            for (JsonNode childDiagnostic : childDiagnostics) {
+                collectProcessDefinitionIds(childDiagnostic, processDefinitionIds);
+            }
+        }
+    }
+
+    private record BulkOrderRetryResult(String orderId,
+                                        Long processInstanceKey,
+                                        String status,
+                                        String policyMode,
+                                        String policyReason,
+                                        String message,
+                                        Integer resolutionCommandAttempts,
+                                        Integer verificationChecks) {
+        private static BulkOrderRetryResult notFound(String orderId) {
+            return new BulkOrderRetryResult(
+                    orderId,
+                    null,
+                    "NOT_FOUND",
+                    null,
+                    null,
+                    "No Camunda process instance was returned for this order ID.",
+                    null,
+                    null
+            );
+        }
+
+        private static BulkOrderRetryResult failed(String orderId, String message) {
+            return new BulkOrderRetryResult(orderId, null, "FAILED", null, null, message, null, null);
+        }
+
+        private static BulkOrderRetryResult fromDecision(String orderId,
+                                                         Long processInstanceKey,
+                                                         IncidentResolutionDecision decision) {
+            return new BulkOrderRetryResult(
+                    orderId,
+                    processInstanceKey,
+                    decision.mode().name(),
+                    decision.mode().name(),
+                    decision.reason(),
+                    firstNonBlank(decision.userFacingGuidance(), decision.reason()),
+                    0,
+                    0
+            );
+        }
+
+        private static BulkOrderRetryResult fromMutation(String orderId,
+                                                         Long processInstanceKey,
+                                                         JsonNode mutation,
+                                                         IncidentResolutionDecision decision) {
+            return new BulkOrderRetryResult(
+                    orderId,
+                    processInstanceKey,
+                    mutation.path("status").asText("FAILED"),
+                    decision.mode().name(),
+                    decision.reason(),
+                    firstNonBlank(
+                            mutation.path("message").asText(),
+                            mutation.path("error").asText()
+                    ),
+                    mutation.has("resolutionCommandAttempts") ? mutation.path("resolutionCommandAttempts").asInt() : null,
+                    mutation.has("verificationChecks") ? mutation.path("verificationChecks").asInt() : null
+            );
+        }
+
+        private static String firstNonBlank(String first, String second) {
+            return StringUtils.hasText(first) ? first : second;
+        }
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return StringUtils.hasText(first) ? first : second;
     }
 }

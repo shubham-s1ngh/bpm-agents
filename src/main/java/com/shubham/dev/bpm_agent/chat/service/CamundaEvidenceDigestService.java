@@ -85,7 +85,12 @@ public class CamundaEvidenceDigestService {
         digest.append(prefix).append("State: ").append(firstText(processInstance, "state")).append('\n');
 
         JsonNode incidents = diagnostic.path("activeIncidents");
-        digest.append(prefix).append("Incident count: ").append(incidents.isArray() ? incidents.size() : 0).append('\n');
+        int directIncidentCount = incidents.isArray() ? incidents.size() : 0;
+        digest.append(prefix).append("Incident count: ").append(directIncidentCount).append('\n');
+        if (depth == 0) {
+            digest.append("Direct incident count on root instance: ").append(directIncidentCount).append('\n');
+            digest.append("Total process-tree incident count: ").append(countIncidentsAcrossTree(diagnostic)).append('\n');
+        }
         if (incidents.isArray()) {
             for (JsonNode incident : incidents) {
                 digest.append(prefix).append("Incident key: ").append(firstText(incident, "key", "incidentKey")).append('\n');
@@ -135,6 +140,14 @@ public class CamundaEvidenceDigestService {
         digest.append("Process instance key: ").append(firstText(diagnostic, "processInstanceKey")).append('\n');
         digest.append("Resolution status: ").append(firstText(diagnostic, "status")).append('\n');
         digest.append("Resolution message: ").append(firstText(diagnostic, "message", "error")).append('\n');
+        String policyReason = firstText(diagnostic, "policyReason");
+        if (StringUtils.hasText(policyReason)) {
+            digest.append("Policy reason: ").append(policyReason).append('\n');
+        }
+        String policyGuidance = firstText(diagnostic, "policyGuidance");
+        if (StringUtils.hasText(policyGuidance)) {
+            digest.append("Policy guidance: ").append(policyGuidance).append('\n');
+        }
         digest.append("Resolution command attempts: ").append(firstText(diagnostic, "resolutionCommandAttempts")).append('\n');
         digest.append("Verification checks: ").append(firstText(diagnostic, "verificationChecks")).append('\n');
 
@@ -288,5 +301,20 @@ public class CamundaEvidenceDigestService {
         if (node.isObject()) {
             node.fields().forEachRemaining(entry -> collectEvidenceTokens(entry.getValue(), allowedNumbers, allowedProcessLikeIdentifiers));
         }
+    }
+
+    private int countIncidentsAcrossTree(JsonNode diagnostic) {
+        if (diagnostic == null || diagnostic.isMissingNode() || diagnostic.isNull()) {
+            return 0;
+        }
+
+        int count = diagnostic.path("activeIncidents").isArray() ? diagnostic.path("activeIncidents").size() : 0;
+        JsonNode children = diagnostic.path("childProcessDiagnostics");
+        if (children.isArray()) {
+            for (JsonNode child : children) {
+                count += countIncidentsAcrossTree(child);
+            }
+        }
+        return count;
     }
 }
