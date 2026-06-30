@@ -1,5 +1,6 @@
 package com.shubham.dev.bpm_agent.camunda.mock;
 
+import org.springframework.http.HttpEntity;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,7 +27,7 @@ public class MockServiceApiController {
     }
 
     @PostMapping("/inventory/reserve")
-    public ResponseEntity<?> reserveInventory(@RequestBody MockServiceClient.InventoryReservationRequest request) {
+    public ResponseEntity<Map<String, Object>> reserveInventory(@RequestBody MockServiceRequest request) {
         Integer forcedStatus = request.forceHttpStatus();
         if (forcedStatus != null) {
             return failure("Inventory DB timeout triggered a mock HTTP %d response.".formatted(forcedStatus),
@@ -37,25 +38,25 @@ public class MockServiceApiController {
                     "TRANSIENT_FAILURE", 500, "inventory-reservation");
         }
         if ("OUT_OF_STOCK".equalsIgnoreCase(request.simulateStock())) {
-            return ResponseEntity.ok(new MockServiceClient.InventoryReservationResponse(
-                    "OUT_OF_STOCK",
-                    "BUSINESS_FAILURE",
-                    "Inventory simulation reported no stock for this order.",
-                    200,
-                    "inventory-reservation"
+            return success(Map.of(
+                    "stockStatus", "OUT_OF_STOCK",
+                    "outcome", "BUSINESS_FAILURE",
+                    "message", "Inventory simulation reported no stock for this order.",
+                    "httpStatus", 200,
+                    "service", "inventory-reservation"
             ));
         }
-        return ResponseEntity.ok(new MockServiceClient.InventoryReservationResponse(
-                "IN_STOCK",
-                "SUCCESS",
-                "Inventory reserved successfully.",
-                200,
-                "inventory-reservation"
+        return success(Map.of(
+                "stockStatus", "IN_STOCK",
+                "outcome", "SUCCESS",
+                "message", "Inventory reserved successfully.",
+                "httpStatus", 200,
+                "service", "inventory-reservation"
         ));
     }
 
     @PostMapping("/payment/charge")
-    public ResponseEntity<?> chargePayment(@RequestBody MockServiceClient.PaymentChargeRequest request) {
+    public ResponseEntity<Map<String, Object>> chargePayment(@RequestBody MockServiceRequest request) {
         Integer forcedStatus = request.forceHttpStatus();
         if (forcedStatus != null) {
             return failure("Payment gateway returned a mock HTTP %d response.".formatted(forcedStatus),
@@ -63,25 +64,29 @@ public class MockServiceApiController {
                     forcedStatus,
                     "payment-charge");
         }
+        if ("BAD_REQUEST".equalsIgnoreCase(request.simulatePayment())) {
+            return failure("Payment gateway rejected the request payload.",
+                    "BAD_REQUEST", 400, "payment-charge");
+        }
         if (shouldFailTransiently()) {
             return failure("Payment gateway returned a mock HTTP 500 response.",
                     "TRANSIENT_FAILURE", 500, "payment-charge");
         }
-        if ("DECLINED".equalsIgnoreCase(request.simulatePayment())) {
-            return ResponseEntity.ok(new MockServiceClient.PaymentChargeResponse(
-                    "DECLINED",
-                    "DECLINED",
-                    "Payment was declined by the mock gateway.",
-                    200,
-                    "payment-charge"
+        if ("DECLINED".equalsIgnoreCase(request.simulatePayment()) || "DECLINE".equalsIgnoreCase(request.simulatePayment())) {
+            return success(Map.of(
+                    "paymentStatus", "DECLINED",
+                    "outcome", "DECLINED",
+                    "message", "Payment was declined by the mock gateway.",
+                    "httpStatus", 200,
+                    "service", "payment-charge"
             ));
         }
-        return ResponseEntity.ok(new MockServiceClient.PaymentChargeResponse(
-                "SUCCESS",
-                "SUCCESS",
-                "Payment captured successfully.",
-                200,
-                "payment-charge"
+        return success(Map.of(
+                "paymentStatus", "SUCCESS",
+                "outcome", "SUCCESS",
+                "message", "Payment captured successfully.",
+                "httpStatus", 200,
+                "service", "payment-charge"
         ));
     }
 
@@ -96,5 +101,15 @@ public class MockServiceApiController {
                 "httpStatus", httpStatus,
                 "service", service
         ));
+    }
+
+    private ResponseEntity<Map<String, Object>> success(Map<String, Object> body) {
+        return ResponseEntity.ok(body);
+    }
+
+    public record MockServiceRequest(String orderId,
+                                     String simulateStock,
+                                     String simulatePayment,
+                                     Integer forceHttpStatus) {
     }
 }

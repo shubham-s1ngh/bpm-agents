@@ -30,6 +30,18 @@ public class IncidentResolutionRuleCatalogService {
                 .toList();
     }
 
+    public List<IncidentResolutionRule> findRulesForWorkflow(String workflowProcessDefinitionId) {
+        if (!StringUtils.hasText(workflowProcessDefinitionId)) {
+            return List.of();
+        }
+
+        return repository.findByWorkflowProcessDefinitionIdAndEnabledTrueOrderByPriorityAscIdAsc(
+                        workflowProcessDefinitionId.trim())
+                .stream()
+                .map(this::toRule)
+                .toList();
+    }
+
     private IncidentResolutionRule toRule(IncidentResolutionRuleEntity entity) {
         return new IncidentResolutionRule(
                 entity.getInstruction(),
