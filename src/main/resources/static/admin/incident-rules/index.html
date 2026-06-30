@@ -1,0 +1,1152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Incident Resolution Rules</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f5f1;
+            --panel: #ffffff;
+            --panel-muted: #f8f7f4;
+            --line: #d8d8d1;
+            --text: #1e241f;
+            --muted: #5f675f;
+            --accent: #1f6f5f;
+            --accent-soft: #e4f2ee;
+            --danger: #a24438;
+            --danger-soft: #fbe8e5;
+            --shadow: 0 18px 48px rgba(29, 36, 31, 0.08);
+            --radius: 18px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            font-family: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, #eef5ed 0, transparent 28rem),
+                linear-gradient(180deg, #fafaf7 0%, var(--bg) 100%);
+        }
+
+        main {
+            max-width: 1320px;
+            margin: 0 auto;
+            padding: 32px 20px 48px;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.3fr) auto;
+            gap: 20px;
+            align-items: center;
+            margin-bottom: 24px;
+            padding: 22px 26px;
+            border: 1px solid rgba(216, 216, 209, 0.88);
+            border-radius: 24px;
+            background:
+                radial-gradient(circle at top right, rgba(228, 242, 238, 0.95) 0, rgba(228, 242, 238, 0) 16rem),
+                linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 247, 244, 0.94) 100%);
+            box-shadow: var(--shadow);
+        }
+
+        .hero-copy {
+            display: grid;
+            gap: 10px;
+        }
+
+        .eyebrow {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        .hero h1 {
+            margin: 0;
+            font-size: clamp(2rem, 4vw, 3rem);
+            letter-spacing: -0.04em;
+            line-height: 0.96;
+        }
+
+        .hero p {
+            margin: 0;
+            max-width: 760px;
+            color: var(--muted);
+            line-height: 1.6;
+            font-size: 1rem;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            justify-self: end;
+            padding: 12px 16px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--muted);
+            font-size: 0.92rem;
+            backdrop-filter: blur(8px);
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1.45fr) minmax(420px, 0.8fr);
+            gap: 20px;
+            align-items: start;
+        }
+
+        .card {
+            min-width: 0;
+            background: var(--panel);
+            border: 1px solid rgba(216, 216, 209, 0.9);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            align-items: center;
+            padding: 20px 22px 14px;
+        }
+
+        .card-header h2 {
+            margin: 0;
+            font-size: 1.1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .card-header p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .toolbar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            padding: 0 22px 18px;
+        }
+
+        .stack {
+            display: grid;
+            gap: 20px;
+            min-width: 0;
+        }
+
+        .field,
+        .field-stack {
+            display: grid;
+            gap: 6px;
+        }
+
+        .field {
+            min-width: 180px;
+        }
+
+        .field-stack {
+            padding: 0 22px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            font-size: 0.84rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        input,
+        select,
+        textarea,
+        button {
+            font: inherit;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px 14px;
+            border-radius: 14px;
+            border: 1px solid var(--line);
+            background: var(--panel-muted);
+            color: var(--text);
+            transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: rgba(31, 111, 95, 0.55);
+            box-shadow: 0 0 0 4px rgba(31, 111, 95, 0.12);
+            background: #fff;
+        }
+
+        textarea {
+            min-height: 110px;
+            resize: vertical;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+            gap: 14px;
+            padding: 0 22px;
+        }
+
+        .checkbox-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-top: 0;
+        }
+
+        .checkbox-row input {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+        }
+
+        .checkbox-row label {
+            letter-spacing: 0.04em;
+        }
+
+        .actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            padding: 6px 22px 22px;
+        }
+
+        button {
+            border: 0;
+            border-radius: 999px;
+            padding: 11px 16px;
+            cursor: pointer;
+            transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+        }
+
+        button:hover {
+            transform: translateY(-1px);
+        }
+
+        button:disabled {
+            opacity: 0.55;
+            cursor: wait;
+            transform: none;
+        }
+
+        .primary {
+            background: var(--accent);
+            color: #fff;
+        }
+
+        .secondary {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .ghost {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid var(--line);
+        }
+
+        .danger {
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
+
+        .status {
+            margin: 0 22px 18px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: var(--panel-muted);
+            color: var(--muted);
+            display: none;
+        }
+
+        .status[data-tone="success"] {
+            display: block;
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .status[data-tone="error"] {
+            display: block;
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
+
+        .suggestion-grid {
+            display: grid;
+            gap: 14px;
+            padding: 0 22px 22px;
+        }
+
+        .suggestion-card {
+            border: 1px solid var(--line);
+            background: var(--panel-muted);
+            border-radius: 16px;
+            padding: 16px;
+        }
+
+        .suggestion-card h3 {
+            margin: 0 0 8px;
+            font-size: 1rem;
+            letter-spacing: -0.02em;
+        }
+
+        .suggestion-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+
+        .suggestion-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .table-wrap {
+            padding: 0 16px 16px;
+        }
+
+        .rule-list {
+            display: grid;
+            gap: 14px;
+        }
+
+        .rule-item {
+            display: grid;
+            gap: 14px;
+            padding: 18px;
+            border: 1px solid rgba(216, 216, 209, 0.9);
+            border-radius: 18px;
+            background:
+                linear-gradient(180deg, rgba(248, 247, 244, 0.88) 0%, rgba(255, 255, 255, 0.98) 100%);
+        }
+
+        .rule-topline {
+            display: flex;
+            justify-content: space-between;
+            gap: 16px;
+            align-items: start;
+            flex-wrap: wrap;
+        }
+
+        .rule-head {
+            min-width: 0;
+            display: grid;
+            gap: 6px;
+        }
+
+        .rule-grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.95fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .rule-copy {
+            min-width: 0;
+            display: grid;
+            gap: 8px;
+        }
+
+        .rule-match-grid {
+            display: grid;
+            gap: 12px;
+            min-width: 0;
+        }
+
+        .rule-section {
+            display: grid;
+            gap: 8px;
+            padding: 12px 14px;
+            border-radius: 14px;
+            background: var(--panel-muted);
+            border: 1px solid rgba(216, 216, 209, 0.82);
+        }
+
+        .rule-section-title {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .rule-title {
+            font-weight: 600;
+            font-size: 1rem;
+            line-height: 1.35;
+        }
+
+        .meta {
+            color: var(--muted);
+            font-size: 0.86rem;
+            line-height: 1.45;
+        }
+
+        .rule-guidance {
+            padding-top: 2px;
+        }
+
+        .chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: var(--panel-muted);
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        .row-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .tag.enabled {
+            background: var(--accent-soft);
+            color: var(--accent);
+        }
+
+        .tag.disabled {
+            background: #efefeb;
+            color: #72786f;
+        }
+
+        .empty-state {
+            padding: 18px 22px 24px;
+            color: var(--muted);
+        }
+
+        .small {
+            font-size: 0.85rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .helper {
+            margin-top: 6px;
+            font-size: 0.8rem;
+            line-height: 1.45;
+            color: var(--muted);
+        }
+
+        aside.card {
+            min-width: 0;
+        }
+
+        @media (max-width: 1380px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 960px) {
+            .hero {
+                grid-template-columns: 1fr;
+                align-items: start;
+            }
+
+            .pill {
+                justify-self: start;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .rule-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 820px) {
+            .checkbox-row {
+                padding-top: 0;
+            }
+
+            .rule-item {
+                padding: 16px;
+            }
+
+            .rule-topline {
+                align-items: stretch;
+            }
+
+            .row-actions {
+                width: 100%;
+            }
+
+            .row-actions button {
+                flex: 1 1 140px;
+            }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <section class="hero">
+        <div class="hero-copy">
+            <div class="eyebrow">Consultant Workspace</div>
+            <h1>Incident Resolution Rules</h1>
+            <p>Review retry policy, upload BPMN models, and maintain incident-handling rules in one place. Consultant updates are saved centrally and applied consistently across the workflow.</p>
+        </div>
+        <div class="pill">Catalog-backed · BPMN-assisted · Strategy-driven</div>
+    </section>
+
+    <section class="layout">
+        <div class="stack">
+        <article class="card">
+            <div class="card-header">
+                <div>
+                    <h2>BPMN Draft Assistant</h2>
+                    <p>Upload parent and subprocess BPMN files to draft likely incident rules from the workflow design. Review the suggestions, then decide which rules should be kept.</p>
+                </div>
+            </div>
+
+            <div id="uploadStatus" class="status"></div>
+
+            <form id="uploadForm">
+                <div class="form-grid">
+                    <div class="field-stack full">
+                        <label for="bpmnFiles">BPMN Files</label>
+                        <input id="bpmnFiles" type="file" accept=".bpmn,.xml" multiple required>
+                    </div>
+                    <div class="field-stack full">
+                        <label for="consultantNotes">Consultant Notes</label>
+                        <textarea id="consultantNotes" placeholder="Optional guidance for the draft, for example: inventory 500 should retry, payment 400 should stay blocked."></textarea>
+                    </div>
+                </div>
+                <div class="actions">
+                    <button id="analyzeButton" class="primary" type="submit">Analyze BPMN</button>
+                </div>
+            </form>
+
+            <div id="processSummaryMount" class="empty-state">No BPMN analysis loaded yet.</div>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <div>
+                    <h2>Suggested Drafts</h2>
+                    <p>These drafts are suggestions only. Review them, then load any draft into the editor before saving.</p>
+                </div>
+            </div>
+
+            <div id="suggestionStatus" class="status"></div>
+            <div id="suggestionMount" class="empty-state">Upload BPMN files to generate candidate rule drafts.</div>
+        </article>
+
+        <article class="card">
+            <div class="card-header">
+                <div>
+                    <h2>Rule Catalog</h2>
+                    <p>Filter by workflow, review rule priority, then edit, disable, or remove rules in place.</p>
+                </div>
+            </div>
+
+            <div class="toolbar">
+                <div class="field">
+                    <label for="filterWorkflow">Workflow Filter</label>
+                    <select id="filterWorkflow">
+                        <option value="">All workflows</option>
+                    </select>
+                </div>
+                <div class="field">
+                    <label>&nbsp;</label>
+                    <button id="refreshButton" class="ghost" type="button">Refresh</button>
+                </div>
+            </div>
+
+            <div id="tableStatus" class="status"></div>
+            <div id="tableMount" class="table-wrap"></div>
+        </article>
+        </div>
+
+        <aside class="card">
+            <div class="card-header">
+                <div>
+                    <h2 id="formHeading">Create Rule</h2>
+                    <p>Use clear filters so rules stay readable, reviewable, and easy to maintain.</p>
+                </div>
+            </div>
+
+            <div id="formStatus" class="status"></div>
+
+            <form id="ruleForm">
+                <input id="ruleId" type="hidden">
+
+                <div class="form-grid">
+                    <div class="field-stack">
+                        <label for="workflowProcessDefinitionId">Workflow Process ID</label>
+                        <input id="workflowProcessDefinitionId" list="workflowOptions" placeholder="handleOrderId" required>
+                        <datalist id="workflowOptions"></datalist>
+                    </div>
+
+                    <div class="field-stack">
+                        <label for="priority">Priority</label>
+                        <input id="priority" type="number" min="1" step="1" placeholder="10" required>
+                    </div>
+
+                    <div class="field-stack">
+                        <label for="resolutionMode">Resolution Mode</label>
+                        <select id="resolutionMode" required></select>
+                    </div>
+
+                    <div class="field-stack checkbox-row">
+                        <input id="enabled" type="checkbox" checked>
+                        <label for="enabled">Rule enabled</label>
+                    </div>
+
+                    <div class="field-stack full">
+                        <label for="instruction">Instruction</label>
+                        <textarea id="instruction" placeholder="Describe the business rule in plain language." required></textarea>
+                    </div>
+
+                    <div class="field-stack">
+                        <label for="errorTypes">Error Types</label>
+                        <input id="errorTypes" placeholder="JOB_NO_RETRIES, CALLED_ELEMENT_ERROR">
+                        <div class="helper">Incident type filter. Examples: `JOB_NO_RETRIES`, `CALLED_ELEMENT_ERROR`.</div>
+                    </div>
+
+                    <div class="field-stack">
+                        <label for="httpStatusCodes">HTTP Status Codes</label>
+                        <input id="httpStatusCodes" placeholder="500, 400">
+                        <div class="helper">Optional HTTP status filter extracted from the incident error text, such as `400` or `500`.</div>
+                    </div>
+
+                    <div class="field-stack full">
+                        <label for="messageContains">Message Contains</label>
+                        <input id="messageContains" placeholder="payment-charge, bad request">
+                        <div class="helper">Extra lowercase text tokens that must appear in the incident message or payload.</div>
+                    </div>
+
+                    <div class="field-stack full">
+                        <label for="reason">Reason</label>
+                        <textarea id="reason" placeholder="Internal explanation returned by the strategy when this rule matches." required></textarea>
+                    </div>
+
+                    <div class="field-stack full">
+                        <label for="userFacingGuidance">User-Facing Guidance</label>
+                        <textarea id="userFacingGuidance" placeholder="Optional user-facing guidance when retry is blocked or skipped."></textarea>
+                    </div>
+                </div>
+
+                <div class="actions">
+                    <button id="saveButton" class="primary" type="submit">Save Rule</button>
+                    <button id="resetButton" class="secondary" type="button">Reset</button>
+                </div>
+            </form>
+
+            <div class="small" style="padding: 0 22px 22px;">
+                Rules are matched conjunctively. If you configure `errorTypes=JOB_NO_RETRIES`, `httpStatusCodes=500`, and `messageContains=payment-charge`, the rule applies only when all of those conditions appear in the incident evidence. The selected resolution mode then decides whether retry is allowed, blocked, or skipped.
+            </div>
+        </aside>
+    </section>
+</main>
+
+<script>
+    const state = {
+        metadata: { workflowProcessDefinitionIds: [], resolutionModes: [] },
+        rules: [],
+        suggestions: [],
+        selectedWorkflow: "",
+        editingRuleId: null
+    };
+
+    const elements = {
+        filterWorkflow: document.getElementById("filterWorkflow"),
+        workflowOptions: document.getElementById("workflowOptions"),
+        refreshButton: document.getElementById("refreshButton"),
+        tableMount: document.getElementById("tableMount"),
+        tableStatus: document.getElementById("tableStatus"),
+        uploadForm: document.getElementById("uploadForm"),
+        uploadStatus: document.getElementById("uploadStatus"),
+        bpmnFiles: document.getElementById("bpmnFiles"),
+        consultantNotes: document.getElementById("consultantNotes"),
+        analyzeButton: document.getElementById("analyzeButton"),
+        processSummaryMount: document.getElementById("processSummaryMount"),
+        suggestionMount: document.getElementById("suggestionMount"),
+        suggestionStatus: document.getElementById("suggestionStatus"),
+        formStatus: document.getElementById("formStatus"),
+        formHeading: document.getElementById("formHeading"),
+        ruleForm: document.getElementById("ruleForm"),
+        ruleId: document.getElementById("ruleId"),
+        workflowProcessDefinitionId: document.getElementById("workflowProcessDefinitionId"),
+        priority: document.getElementById("priority"),
+        resolutionMode: document.getElementById("resolutionMode"),
+        enabled: document.getElementById("enabled"),
+        instruction: document.getElementById("instruction"),
+        errorTypes: document.getElementById("errorTypes"),
+        httpStatusCodes: document.getElementById("httpStatusCodes"),
+        messageContains: document.getElementById("messageContains"),
+        reason: document.getElementById("reason"),
+        userFacingGuidance: document.getElementById("userFacingGuidance"),
+        saveButton: document.getElementById("saveButton"),
+        resetButton: document.getElementById("resetButton")
+    };
+
+    async function requestJson(url, options = {}) {
+        const response = await fetch(url, {
+            headers: {
+                "Content-Type": "application/json",
+                ...(options.headers || {})
+            },
+            ...options
+        });
+
+        if (response.status === 204) {
+            return null;
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        const body = contentType.includes("application/json") ? await response.json() : await response.text();
+
+        if (!response.ok) {
+            const message = typeof body === "string" ? body : body.message || "Request failed.";
+            throw new Error(message);
+        }
+
+        return body;
+    }
+
+    async function requestMultipart(url, formData) {
+        const response = await fetch(url, {
+            method: "POST",
+            body: formData
+        });
+
+        const contentType = response.headers.get("content-type") || "";
+        const body = contentType.includes("application/json") ? await response.json() : await response.text();
+        if (!response.ok) {
+            const message = typeof body === "string" ? body : body.message || "Request failed.";
+            throw new Error(message);
+        }
+        return body;
+    }
+
+    function setStatus(target, tone, message) {
+        target.textContent = message || "";
+        if (!message) {
+            target.style.display = "none";
+            target.removeAttribute("data-tone");
+            return;
+        }
+        target.style.display = "block";
+        target.setAttribute("data-tone", tone);
+    }
+
+    function parseCsvText(value, transform = (item) => item) {
+        return value
+            .split(",")
+            .map(item => item.trim())
+            .filter(Boolean)
+            .map(transform);
+    }
+
+    function serializeCsv(values) {
+        return (values || []).join(", ");
+    }
+
+    function buildPayload() {
+        return {
+            workflowProcessDefinitionId: elements.workflowProcessDefinitionId.value.trim(),
+            priority: Number(elements.priority.value),
+            enabled: elements.enabled.checked,
+            instruction: elements.instruction.value.trim(),
+            errorTypes: parseCsvText(elements.errorTypes.value, item => item.toUpperCase()),
+            httpStatusCodes: parseCsvText(elements.httpStatusCodes.value, item => Number(item)).filter(Number.isFinite),
+            messageContains: parseCsvText(elements.messageContains.value, item => item.toLowerCase()),
+            resolutionMode: elements.resolutionMode.value,
+            reason: elements.reason.value.trim(),
+            userFacingGuidance: elements.userFacingGuidance.value.trim()
+        };
+    }
+
+    function populateMetadata() {
+        elements.filterWorkflow.innerHTML = `<option value="">All workflows</option>`;
+        elements.workflowOptions.innerHTML = "";
+        for (const workflowId of state.metadata.workflowProcessDefinitionIds) {
+            const option = document.createElement("option");
+            option.value = workflowId;
+            option.textContent = workflowId;
+            elements.filterWorkflow.appendChild(option.cloneNode(true));
+            elements.workflowOptions.appendChild(option);
+        }
+
+        elements.filterWorkflow.value = state.selectedWorkflow;
+
+        elements.resolutionMode.innerHTML = "";
+        for (const mode of state.metadata.resolutionModes) {
+            const option = document.createElement("option");
+            option.value = mode;
+            option.textContent = mode;
+            elements.resolutionMode.appendChild(option);
+        }
+    }
+
+    function renderProcessSummaries(processes) {
+        if (!processes || !processes.length) {
+            elements.processSummaryMount.innerHTML = `<div class="empty-state">No BPMN processes were parsed.</div>`;
+            return;
+        }
+
+        const content = processes.map(process => `
+            <div class="suggestion-card">
+                <h3>${escapeHtml(process.processName)} <span class="meta">(${escapeHtml(process.processDefinitionId)})</span></h3>
+                <div class="meta">Source file: ${escapeHtml(process.fileName)} · Candidates found: ${process.candidates.length}</div>
+                <div class="suggestion-meta">
+                    ${process.candidates.map(candidate => `
+                        <span class="chip">${escapeHtml(candidate.elementType)} · ${escapeHtml(candidate.elementName)}</span>
+                    `).join("")}
+                </div>
+            </div>
+        `).join("");
+
+        elements.processSummaryMount.innerHTML = `<div class="suggestion-grid">${content}</div>`;
+    }
+
+    function renderSuggestions(suggestions) {
+        if (!suggestions || !suggestions.length) {
+            elements.suggestionMount.innerHTML = `<div class="empty-state">No draft suggestions were returned from the BPMN analysis.</div>`;
+            return;
+        }
+
+        const cards = suggestions.map((suggestion, index) => `
+            <div class="suggestion-card">
+                <h3>${escapeHtml(suggestion.elementName || suggestion.elementId)}</h3>
+                <div class="suggestion-meta">
+                    <span class="tag ${suggestion.source === "AI" ? "enabled" : "disabled"}">${escapeHtml(suggestion.source)}</span>
+                    <span class="chip">${escapeHtml(suggestion.workflowProcessDefinitionId)}</span>
+                    <span class="chip">${escapeHtml(suggestion.elementType)}</span>
+                    ${suggestion.jobType ? `<span class="chip">${escapeHtml(suggestion.jobType)}</span>` : ""}
+                    ${suggestion.calledElement ? `<span class="chip">${escapeHtml(suggestion.calledElement)}</span>` : ""}
+                    <span class="chip">${escapeHtml(suggestion.resolutionMode)}</span>
+                </div>
+                <div>${escapeHtml(suggestion.instruction)}</div>
+                <div class="meta" style="margin-top:8px;">${escapeHtml(suggestion.reason)}</div>
+                <div class="suggestion-meta" style="margin-top:12px;">
+                    ${renderInlineChips("Error", suggestion.errorTypes)}
+                    ${renderInlineChips("HTTP", (suggestion.httpStatusCodes || []).map(String))}
+                    ${renderInlineChips("Tokens", suggestion.messageContains)}
+                </div>
+                <div class="suggestion-actions">
+                    <button class="secondary" type="button" onclick="applySuggestion(${index})">Load Into Editor</button>
+                </div>
+            </div>
+        `).join("");
+
+        elements.suggestionMount.innerHTML = `<div class="suggestion-grid">${cards}</div>`;
+    }
+
+    function renderInlineChips(label, values) {
+        if (!values || !values.length) {
+            return "";
+        }
+        return `<span class="meta">${escapeHtml(label)}:</span>${values.map(value => `<span class="chip">${escapeHtml(value)}</span>`).join("")}`;
+    }
+
+    function renderRules() {
+        if (!state.rules.length) {
+            elements.tableMount.innerHTML = `<div class="empty-state">No rules found for the current filter.</div>`;
+            return;
+        }
+
+        const rows = state.rules.map(rule => `
+            <article class="rule-item">
+                <div class="rule-topline">
+                    <div class="rule-head">
+                        <div class="rule-title">${escapeHtml(rule.workflowProcessDefinitionId)}</div>
+                        <div class="meta">Priority ${rule.priority} · ${escapeHtml(rule.resolutionMode)} · Rule #${rule.id}</div>
+                    </div>
+                    <span class="tag ${rule.enabled ? "enabled" : "disabled"}">${rule.enabled ? "Enabled" : "Disabled"}</span>
+                </div>
+
+                <div class="rule-grid">
+                    <div class="rule-copy">
+                        <div class="rule-section">
+                            <div class="rule-section-title">Instruction</div>
+                            <div>${escapeHtml(rule.instruction)}</div>
+                        </div>
+                        <div class="rule-section">
+                            <div class="rule-section-title">Reason</div>
+                            <div class="meta">${escapeHtml(rule.reason)}</div>
+                        </div>
+                        <div class="rule-section rule-guidance">
+                            <div class="rule-section-title">Guidance</div>
+                            <div class="meta">${escapeHtml(rule.userFacingGuidance || "No user-facing guidance configured.")}</div>
+                        </div>
+                    </div>
+
+                    <div class="rule-match-grid">
+                        <div class="rule-section">
+                            <div class="rule-section-title">Error Types</div>
+                            ${renderChips(rule.errorTypes)}
+                        </div>
+                        <div class="rule-section">
+                            <div class="rule-section-title">HTTP Status</div>
+                            ${renderChips((rule.httpStatusCodes || []).map(String))}
+                        </div>
+                        <div class="rule-section">
+                            <div class="rule-section-title">Message Tokens</div>
+                            ${renderChips(rule.messageContains)}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row-actions">
+                    <button class="secondary" type="button" onclick="editRule(${rule.id})">Edit</button>
+                    <button class="ghost" type="button" onclick="toggleRule(${rule.id}, ${!rule.enabled})">${rule.enabled ? "Disable" : "Enable"}</button>
+                    <button class="danger" type="button" onclick="deleteRule(${rule.id})">Delete</button>
+                </div>
+            </article>
+        `).join("");
+
+        elements.tableMount.innerHTML = `<div class="rule-list">${rows}</div>`;
+    }
+
+    function renderChips(values) {
+        if (!values || !values.length) {
+            return `<span class="meta">—</span>`;
+        }
+        return `<div class="chips">${values.map(value => `<span class="chip">${escapeHtml(value)}</span>`).join("")}</div>`;
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#39;");
+    }
+
+    function resetForm() {
+        state.editingRuleId = null;
+        elements.ruleId.value = "";
+        elements.ruleForm.reset();
+        elements.enabled.checked = true;
+        if (state.metadata.resolutionModes.length) {
+            elements.resolutionMode.value = state.metadata.resolutionModes[0];
+        }
+        elements.formHeading.textContent = "Create Rule";
+        setStatus(elements.formStatus, "", "");
+    }
+
+    window.applySuggestion = function (index) {
+        const suggestion = state.suggestions?.[index];
+        if (!suggestion) {
+            return;
+        }
+        state.editingRuleId = null;
+        elements.ruleId.value = "";
+        elements.workflowProcessDefinitionId.value = suggestion.workflowProcessDefinitionId || "";
+        elements.priority.value = "";
+        elements.resolutionMode.value = suggestion.resolutionMode || (state.metadata.resolutionModes[0] || "");
+        elements.enabled.checked = true;
+        elements.instruction.value = suggestion.instruction || "";
+        elements.errorTypes.value = serializeCsv(suggestion.errorTypes);
+        elements.httpStatusCodes.value = serializeCsv(suggestion.httpStatusCodes);
+        elements.messageContains.value = serializeCsv(suggestion.messageContains);
+        elements.reason.value = suggestion.reason || "";
+        elements.userFacingGuidance.value = suggestion.userFacingGuidance || "";
+        elements.formHeading.textContent = `Draft For ${suggestion.elementName || suggestion.elementId}`;
+        setStatus(elements.formStatus, "success", "Draft loaded into the editor. Review it before saving.");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    window.editRule = function (ruleId) {
+        const rule = state.rules.find(item => item.id === ruleId);
+        if (!rule) {
+            return;
+        }
+        state.editingRuleId = rule.id;
+        elements.ruleId.value = String(rule.id);
+        elements.workflowProcessDefinitionId.value = rule.workflowProcessDefinitionId;
+        elements.priority.value = rule.priority;
+        elements.resolutionMode.value = rule.resolutionMode;
+        elements.enabled.checked = rule.enabled;
+        elements.instruction.value = rule.instruction;
+        elements.errorTypes.value = serializeCsv(rule.errorTypes);
+        elements.httpStatusCodes.value = serializeCsv(rule.httpStatusCodes);
+        elements.messageContains.value = serializeCsv(rule.messageContains);
+        elements.reason.value = rule.reason;
+        elements.userFacingGuidance.value = rule.userFacingGuidance || "";
+        elements.formHeading.textContent = `Edit Rule #${rule.id}`;
+        setStatus(elements.formStatus, "", "");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    window.toggleRule = async function (ruleId, enabled) {
+        try {
+            setStatus(elements.tableStatus, "", "");
+            await requestJson(`/api/admin/incident-resolution-rules/${ruleId}/enabled`, {
+                method: "PATCH",
+                body: JSON.stringify({ enabled })
+            });
+            await loadRules();
+            setStatus(elements.tableStatus, "success", `Rule #${ruleId} ${enabled ? "enabled" : "disabled"}.`);
+        } catch (error) {
+            setStatus(elements.tableStatus, "error", error.message);
+        }
+    };
+
+    window.deleteRule = async function (ruleId) {
+        if (!window.confirm(`Delete rule #${ruleId}?`)) {
+            return;
+        }
+        try {
+            setStatus(elements.tableStatus, "", "");
+            await requestJson(`/api/admin/incident-resolution-rules/${ruleId}`, { method: "DELETE" });
+            if (state.editingRuleId === ruleId) {
+                resetForm();
+            }
+            await loadRules();
+            setStatus(elements.tableStatus, "success", `Rule #${ruleId} deleted.`);
+        } catch (error) {
+            setStatus(elements.tableStatus, "error", error.message);
+        }
+    };
+
+    async function loadMetadata() {
+        state.metadata = await requestJson("/api/admin/incident-resolution-rules/metadata");
+        populateMetadata();
+        if (!elements.resolutionMode.value && state.metadata.resolutionModes.length) {
+            elements.resolutionMode.value = state.metadata.resolutionModes[0];
+        }
+    }
+
+    async function loadRules() {
+        const query = state.selectedWorkflow ? `?workflowProcessDefinitionId=${encodeURIComponent(state.selectedWorkflow)}` : "";
+        state.rules = await requestJson(`/api/admin/incident-resolution-rules${query}`);
+        renderRules();
+    }
+
+    async function initialize() {
+        try {
+            state.suggestions = [];
+            await loadMetadata();
+            await loadRules();
+            resetForm();
+        } catch (error) {
+            setStatus(elements.tableStatus, "error", error.message);
+        }
+    }
+
+    elements.refreshButton.addEventListener("click", async () => {
+        try {
+            setStatus(elements.tableStatus, "", "");
+            await loadMetadata();
+            await loadRules();
+        } catch (error) {
+            setStatus(elements.tableStatus, "error", error.message);
+        }
+    });
+
+    elements.filterWorkflow.addEventListener("change", async (event) => {
+        state.selectedWorkflow = event.target.value;
+        try {
+            setStatus(elements.tableStatus, "", "");
+            await loadRules();
+        } catch (error) {
+            setStatus(elements.tableStatus, "error", error.message);
+        }
+    });
+
+    elements.resetButton.addEventListener("click", resetForm);
+
+    elements.uploadForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!elements.bpmnFiles.files.length) {
+            setStatus(elements.uploadStatus, "error", "Select at least one BPMN file first.");
+            return;
+        }
+
+        const formData = new FormData();
+        for (const file of elements.bpmnFiles.files) {
+            formData.append("files", file);
+        }
+        formData.append("consultantNotes", elements.consultantNotes.value.trim());
+
+        elements.analyzeButton.disabled = true;
+        try {
+            setStatus(elements.uploadStatus, "", "");
+            setStatus(elements.suggestionStatus, "", "");
+            const response = await requestMultipart("/api/admin/incident-resolution-rules/suggestions", formData);
+            state.suggestions = response.suggestions || [];
+            renderProcessSummaries(response.processes || []);
+            renderSuggestions(state.suggestions);
+            setStatus(elements.uploadStatus, "success", `Analyzed ${elements.bpmnFiles.files.length} BPMN file(s) and prepared ${state.suggestions.length} draft suggestion(s).`);
+        } catch (error) {
+            setStatus(elements.uploadStatus, "error", error.message);
+            setStatus(elements.suggestionStatus, "error", error.message);
+        } finally {
+            elements.analyzeButton.disabled = false;
+        }
+    });
+
+    elements.ruleForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const payload = buildPayload();
+        const isEditing = Boolean(state.editingRuleId);
+        elements.saveButton.disabled = true;
+        try {
+            const url = isEditing
+                ? `/api/admin/incident-resolution-rules/${state.editingRuleId}`
+                : "/api/admin/incident-resolution-rules";
+            await requestJson(url, {
+                method: isEditing ? "PUT" : "POST",
+                body: JSON.stringify(payload)
+            });
+            await loadMetadata();
+            await loadRules();
+            resetForm();
+            setStatus(elements.formStatus, "success", `Rule ${isEditing ? "updated" : "created"} successfully.`);
+        } catch (error) {
+            setStatus(elements.formStatus, "error", error.message);
+        } finally {
+            elements.saveButton.disabled = false;
+        }
+    });
+
+    initialize();
+</script>
+</body>
+</html>

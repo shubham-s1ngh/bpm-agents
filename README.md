@@ -142,7 +142,7 @@ Run all tests:
 mvn -q test
 ```
 
-Run focused tests:
+Focused examples:
 
 ```powershell
 mvn -q "-Dtest=CamundaDiagnosticToolsTest,CamundaEvidenceDigestServiceTest,CamundaDiagnosticReportServiceTest" test
