@@ -30,10 +30,11 @@ Current local target:
 | Session orchestrator | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaAgentChatService.java` | Resolves workflow strategy, gates mutation intent, runs the tool loop, and routes diagnosis or retry results into the reporting path. |
 | Tool dispatch | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaToolDispatchService.java` | Extracts tool JSON from model output, dispatches allowed tools, and serializes tool results. |
 | Diagnostic tools | `src/main/java/com/shubham/dev/bpm_agent/chat/CamundaDiagnosticTools.java` | Exposes Camunda search, variable fetch, deep diagnosis, and incident-resolution tools with post-resolution verification. |
-| Report service | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java` | Deterministically renders incident-resolution payloads and converts read-only diagnostic payloads into grounded markdown through canonical evidence digests and report validation. |
+| Report service | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaDiagnosticReportService.java` | Deterministically renders incident-resolution payloads and converts read-only diagnostic payloads into grounded markdown through canonical evidence digests, prompt-aware interpretation sections, and report validation. |
 | Evidence digest | `src/main/java/com/shubham/dev/bpm_agent/chat/service/CamundaEvidenceDigestService.java` | Deterministically normalizes diagnostic and incident-resolution JSON into canonical evidence. |
 | Grounding validator | `src/main/java/com/shubham/dev/bpm_agent/chat/validation/CamundaReportGroundingValidator.java` | Rejects unsupported identifiers, contradictory states, incorrect incident summaries, and leaked tool JSON. |
-| Workflow knowledge retrieval | `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java` | Indexes workflow BPMN context and consultant-managed rules into a local Spring AI vector store for read-only report enrichment. |
+| Workflow knowledge retrieval | `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java` | Uses the injected vector store, registered workflow strategies, and persisted rules to build a workflow-scoped retrieval corpus for read-only report enrichment, initializes that corpus explicitly at startup, refreshes it with replace-and-rebuild semantics after rule changes, and indexes structured BPMN chunks instead of filename previews. |
+| BPMN knowledge extraction | `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/BpmnKnowledgeExtractor.java` | Parses BPMN XML into process-aware knowledge models and exposes reachable process graphs so retrieval can include child workflow structure safely. |
 | Camunda REST client | `src/main/java/com/shubham/dev/bpm_agent/camunda/CamundaOrchestrationClient.java` | Calls Camunda 8 REST v2 endpoints using Spring `RestClient` for search, diagnosis, and mutation operations. |
 | Workflow strategy contract | `src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowContextStrategy.java` | Defines process ID resolution, prompt applicability, context instructions, variable translation, report instructions, workflow-owned incident-resolution policy defaults, and workflow-owned business identifier extraction. |
 | Strategy registry | `src/main/java/com/shubham/dev/bpm_agent/strategy/WorkflowStrategyRegistry.java` | Selects the first applicable workflow strategy for a user prompt. |
@@ -222,12 +223,13 @@ Current rule storage:
 - The same UI now uses `/api/admin/incident-resolution-rules/suggestions` for BPMN upload and advisory draft generation.
 - Admin writes are normalized before persistence so error types stay canonical, HTTP status codes stay numeric, and free-text message tokens remain deterministic for runtime matching.
 - BPMN-assisted drafts remain unsaved until a consultant explicitly loads one into the editor and presses save, which keeps the existing agent behavior unchanged until human review is complete.
-- Rule CRUD operations now refresh the workflow knowledge vector index so read-only reporting uses the latest consultant-managed policy context.
+- Rule CRUD operations now refresh the workflow knowledge vector corpus so read-only reporting uses the latest consultant-managed policy context.
 
 Current bulk retry support:
 
 - The order workflow now supports deterministic bulk retry when one prompt contains multiple `orderId` values and explicit retry intent.
 - The orchestrator searches each `orderId` independently, diagnoses the active process instance when found, evaluates the `OrderWorkflowStrategy` policy per order, and only then retries or blocks that order.
+- If explicit retry intent is present with multiple business-identifier-like tokens but no workflow strategy matches, the request is blocked deterministically instead of falling back to a model-guessed mutation target.
 - This is currently order-workflow-specific and does not yet expose a generic batch tool contract for every workflow strategy.
 
 ## Local Mock Failure Harness

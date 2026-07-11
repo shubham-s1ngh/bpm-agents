@@ -84,15 +84,18 @@ public class CamundaAgentChatService {
         String selectedProcessId = strategyOpt.map(WorkflowContextStrategy::getProcessDefinitionId).orElse("UNKNOWN");
         log.info("[WORKFLOW STRATEGY] Selected processId: {}", selectedProcessId);
 
-        ChatClient executionChatClient = chatClientBuilder
-                .defaultSystem(buildExecutionSystemInstructions(selectedProcessId, bpmnContext, businessIdentifierInstructions, translations, allowRetryIncident))
-                .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
-                .build();
-
         try {
             if (allowRetryIncident && directIncidentKey.isPresent()) {
                 log.info("[DIRECT MUTATION ROUTE] Explicit retry intent with incidentKey: {}", directIncidentKey.get());
                 return resolveIncidentByKeyReport(conversationId, prompt, strategyOpt, directIncidentKey.get());
+            }
+
+            if (allowRetryIncident) {
+                String multiIdentifierGuardResponse = guardUnscopedBulkRetryPrompt(prompt, strategyOpt);
+                if (multiIdentifierGuardResponse != null) {
+                    log.warn("[BULK RETRY GUARD] {}", multiIdentifierGuardResponse);
+                    return multiIdentifierGuardResponse;
+                }
             }
 
             if (allowRetryIncident && isBulkBusinessIdentifierRetryPrompt(prompt, strategyOpt)) {
@@ -123,6 +126,11 @@ public class CamundaAgentChatService {
                 String diagnosticPayload = toolDispatchService.serialize(diagnosticTools.diagnoseProcessInstance(directProcessInstanceKey.get()));
                 return diagnosticReportService.generateReport(conversationId, prompt, diagnosticPayload, strategyOpt);
             }
+
+            ChatClient executionChatClient = chatClientBuilder
+                    .defaultSystem(buildExecutionSystemInstructions(selectedProcessId, bpmnContext, businessIdentifierInstructions, translations, allowRetryIncident))
+                    .defaultAdvisors(MessageChatMemoryAdvisor.builder(chatMemory).build())
+                    .build();
 
             return runExecutionLoop(prompt, conversationId, strategyOpt, executionChatClient, allowRetryIncident);
         } finally {
@@ -543,6 +551,36 @@ public class CamundaAgentChatService {
         return strategyOpt
                 .map(strategy -> strategy.extractBusinessIdentifiers(prompt).size() > 1)
                 .orElse(false);
+    }
+
+    private String guardUnscopedBulkRetryPrompt(String prompt, Optional<WorkflowContextStrategy> strategyOpt) {
+        if (strategyOpt.isPresent()) {
+            return null;
+        }
+
+        if (extractRequestedIncidentKey(prompt).isPresent() || extractRequestedProcessInstanceKey(prompt, true).isPresent()) {
+            return null;
+        }
+
+        List<String> likelyBusinessIdentifiers = extractLikelyBusinessIdentifiers(prompt);
+        if (likelyBusinessIdentifiers.size() <= 1) {
+            return null;
+        }
+
+        return """
+                Retry is blocked because the request contains multiple business identifiers but no workflow strategy matched the prompt.
+                Add workflow context such as `order`, or retry with explicit process instance keys instead.
+                Identifiers detected: %s
+                """.formatted(String.join(", ", likelyBusinessIdentifiers)).trim();
+    }
+
+    private List<String> extractLikelyBusinessIdentifiers(String prompt) {
+        Matcher matcher = Pattern.compile("\\b[A-Z]{2,12}-\\d+\\b", Pattern.CASE_INSENSITIVE).matcher(prompt);
+        Set<String> identifiers = new LinkedHashSet<>();
+        while (matcher.find()) {
+            identifiers.add(matcher.group().toUpperCase());
+        }
+        return List.copyOf(identifiers);
     }
 
     private String resolveIncidentByKeyReport(String conversationId,

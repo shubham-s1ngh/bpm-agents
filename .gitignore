@@ -36,3 +36,6 @@ build/
 *.db
 *.mv.db
 *.trace.db
+
+### Generated Retrieval Artifacts ###
+data/ai/

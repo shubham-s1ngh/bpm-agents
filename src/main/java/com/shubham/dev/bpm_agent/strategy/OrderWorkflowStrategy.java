@@ -29,7 +29,10 @@ public class OrderWorkflowStrategy implements WorkflowContextStrategy {
     @Override
     public boolean isApplicable(String userPrompt) {
         String promptLower = userPrompt.toLowerCase();
-        return promptLower.contains("order") || promptLower.contains("category") || promptLower.contains("handleorder");
+        return promptLower.contains("order")
+                || promptLower.contains("category")
+                || promptLower.contains("handleorder")
+                || !extractBusinessIdentifiers(userPrompt).isEmpty();
     }
 
     @Override

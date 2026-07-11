@@ -81,30 +81,38 @@ This journey view explains the same architecture from the operator's perspective
 
 ```mermaid
 journey
-    title Operator Journey Through bpm-ai Diagnostic And Retry Flow
-    section Ask
-      Submit order or incident question: 5: Operator
-      Request a retry only when operationally intended: 4: Operator
-    section Resolve
-      Match the request to the right workflow strategy: 5: bpm-ai
-      Decide whether this is diagnosis or mutation: 5: bpm-ai
-    section Verify
-      Query Camunda for live process state and incidents: 5: bpm-ai, Camunda 8
-      Confirm post-retry state instead of assuming success: 5: bpm-ai, Camunda 8
-    section Explain
-      Use the LLM to shape the response wording: 4: bpm-ai, LLM Runtime
-      Validate the final answer against deterministic evidence: 5: bpm-ai
-    section Respond
-      Return a grounded markdown response: 5: bpm-ai
-      Avoid invented IDs, statuses, and success claims: 5: bpm-ai
+  title Operator Journey Through bpm-ai Diagnostic And Retry Flow
+  section Ask
+    provide business identifier: 5: Operator
+    ask to diagnose or retry: 4: Operator
+  section Resolve
+    resolve workflow strategy: 5: bpm-ai
+    classify diagnosis vs retry: 5: bpm-ai
+  section Inspect
+    query Camunda APIs: 5: bpm-ai, Camunda 8
+    confirm live runtime state: 5: bpm-ai, Camunda 8
+  section Decide
+    evaluate retry policy: 5: bpm-ai
+    gate mutation by intent: 5: bpm-ai
+  section Act
+    resolve only if allowed: 4: bpm-ai, Camunda 8
+    verify latest state snapshot: 5: bpm-ai, Camunda 8
+  section Explain
+    LLM explains diagnostics: 4: bpm-ai, LLM Runtime
+    deterministic retry reporting: 5: bpm-ai
+    validate final answer: 5: bpm-ai
+  section Respond
+    return a grounded markdown response: 5: bpm-ai
+    avoid hallucinated or stale operational claims: 5: bpm-ai
 ```
 
 Journey highlights:
 
 - The operator starts with a natural-language question, not a low-level API command.
 - `bpm-ai` resolves workflow context before it tries to interpret runtime state.
-- Camunda remains the source of truth for diagnosis and retry verification.
-- The LLM helps present the answer, but the final response is still grounded and validated before it is returned.
+- Camunda remains the source of truth for diagnosis, retry execution, and post-mutation verification.
+- Retry actions are gated by explicit intent and workflow policy before any mutation is sent.
+- Read-only diagnostics can use LLM-assisted explanation, but retry outcomes are reported from the latest verified state snapshot.
 
 ## Diagnostic And Retry Flow
 
@@ -252,14 +260,22 @@ sequenceDiagram
   - Creates the report-only model client for read-only diagnostic payloads.
   - Uses the canonical evidence digest instead of raw nested payload as the primary reporting context.
   - Pulls top-K workflow knowledge snippets from the local vector store for read-only reporting so the LLM gets BPMN and consultant-rule context without being allowed to invent live runtime state.
+  - Shapes read-only report headers by prompt intent so waiting-point and workflow-path questions can produce focused top sections without weakening grounded evidence sections.
   - Enforces markdown-only final output.
   - Retries once after grounding rejection.
   - Falls back to sanitization if the model still leaks unsupported identifiers or contradictions.
 
 - `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java`
-  - Indexes workflow strategy context and consultant-managed incident rules into a local Spring AI `SimpleVectorStore`.
-  - Refreshes the knowledge index on startup and after rule CRUD operations.
+  - Uses one production retrieval contract backed by the injected workflow knowledge `VectorStore`, registered workflow strategies, and persisted consultant-managed rules.
+  - Builds retrievable workflow documents for strategy context, persisted rules, and structured BPMN knowledge chunks.
+  - Rebuilds the retrieval corpus explicitly at startup and refreshes it after rule CRUD operations.
+  - Uses replace-and-rebuild refresh semantics so the stored workflow knowledge remains deterministic and idempotent across updates.
   - Supplies similarity-searched workflow context only for LLM explanation, not for live runtime evidence.
+
+- `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/BpmnKnowledgeExtractor.java`
+  - Parses BPMN XML resources into process-aware knowledge models.
+  - Extracts process IDs, names, service tasks, call activities, gateways, and boundary events.
+  - Resolves reachable child-process graphs so root workflow retrieval can include subprocess BPMN context safely.
 
 ### Validation Layer
 
@@ -290,17 +306,18 @@ sequenceDiagram
    - build a strategy-owned incident-resolution decision for each order independently
    - execute process-instance or incident-key resolution only when that per-order decision allows it
    - return a markdown bulk summary with per-order outcomes
-7. Otherwise the execution model is prompted to emit one of the allowed tool JSON blocks.
-8. `CamundaToolDispatchService` parses and dispatches the tool call.
-9. If a process search returns an active instance, the agent deterministically escalates:
+7. If explicit retry intent is present together with multiple business-identifier-like tokens but no workflow strategy matches the prompt, the agent blocks the request and asks for clearer workflow context instead of allowing the model loop to guess a process instance key.
+8. Otherwise the execution model is prompted to emit one of the allowed tool JSON blocks.
+9. `CamundaToolDispatchService` parses and dispatches the tool call.
+10. If a process search returns an active instance, the agent deterministically escalates:
    - to `diagnoseProcessInstance` for read-only diagnostic prompts
    - to `resolveIncidentsByProcessInstance` for explicit retry prompts
-10. Once a diagnostic or mutation payload is available, `CamundaDiagnosticReportService` builds a canonical evidence digest using `CamundaEvidenceDigestService`.
-11. Incident-resolution payloads are rendered deterministically from Camunda JSON so post-retry child-process evidence remains exact.
-12. Read-only diagnostic payloads still use the report model to generate markdown from the digest, augmented with vector-retrieved BPMN and consultant-rule context.
-13. `CamundaReportGroundingValidator` validates model-rendered reports against the evidence snapshot.
-14. If grounding fails, the report service retries once with explicit rejection reasons.
-15. If grounding still fails, the report is sanitized and returned.
+11. Once a diagnostic or mutation payload is available, `CamundaDiagnosticReportService` builds a canonical evidence digest using `CamundaEvidenceDigestService`.
+12. Incident-resolution payloads are rendered deterministically from Camunda JSON so post-retry child-process evidence remains exact.
+13. Read-only diagnostic payloads still use the report model to generate markdown from the digest, augmented with vector-retrieved BPMN and consultant-rule context.
+14. `CamundaReportGroundingValidator` validates model-rendered reports against the evidence snapshot.
+15. If grounding fails, the report service retries once with explicit rejection reasons.
+16. If grounding still fails, the report is sanitized and returned.
 
 ## Why This Structure Is Better Than the Original Controller
 
@@ -323,7 +340,7 @@ That made the class large, fragile, and difficult to test. The current structure
 
 ## Constraints and Guardrails
 
-- The final response is agent-generated, not Java-template-generated.
+- Read-only diagnostic responses are LLM-generated under grounding validation, while incident-resolution responses are rendered deterministically from verified Camunda payloads.
 - The final response must remain grounded to Camunda evidence.
 - Vector-retrieved workflow knowledge can guide LLM explanation, but it must never override live Camunda state, process-instance keys, incident counts, or variables.
 - The report path uses a report-only chat client and must never emit tool JSON.
