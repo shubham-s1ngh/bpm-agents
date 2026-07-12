@@ -39,3 +39,7 @@ build/
 
 ### Generated Retrieval Artifacts ###
 data/ai/
+
+### Local Planning Docs ###
+docs/plans/
+docs/articles/
