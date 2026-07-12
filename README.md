@@ -44,6 +44,8 @@ This project is useful for:
 - grounded read-only diagnostic reports
 - deterministic post-retry reports
 - vector-backed workflow knowledge retrieval for better explanation
+  - startup-initialized, replace-and-rebuild index lifecycle for consultant rule and BPMN knowledge
+  - structured BPMN indexing for process summaries, call activities, service tasks, gateways, and boundary events
 
 ## Current Release Scope
 
@@ -56,6 +58,7 @@ Current first-class workflow strategy:
 Current order workflow support includes:
 
 - `ORD-...` identifier extraction
+- bare `ORD-...` prompts can resolve the order workflow strategy even when the word `order` is omitted
 - category translation
 - subprocess-aware incident matching
 - transient `500` retry handling
@@ -80,23 +83,26 @@ Current order workflow support includes:
 3. It searches Camunda using the workflow’s business identifier.
 4. It gathers process state, variables, incidents, flow elements, and child subprocess diagnostics.
 5. It builds a grounded report from that evidence.
+6. When the prompt asks `where is it waiting` or `what is the current path`, the report can add an intent-specific interpretation section above the evidence blocks.
 
 ### Retry flow
 
 1. The user explicitly asks to retry an incident.
 2. The app diagnoses the active process instance first.
-3. The workflow strategy evaluates whether retry is allowed, blocked, or skipped.
-4. If allowed, the app sends the Camunda incident-resolution mutation.
-5. It verifies the result before reporting success.
+3. If the request contains multiple business identifiers, the app routes through deterministic bulk orchestration instead of letting the model guess a process instance key.
+4. The workflow strategy evaluates whether retry is allowed, blocked, or skipped.
+5. If allowed, the app sends the Camunda incident-resolution mutation.
+6. It verifies the result before reporting success.
 
 ## Important Behavior
 
 - Camunda is the source of truth for runtime state.
 - The app should not invent instance keys, variables, incidents, or statuses.
 - Evidence normalization stays deterministic in Java.
-- Read-only reports can use the LLM for explanation, but only with grounded evidence.
+- Read-only reports can use the LLM for explanation, but only with grounded evidence and prompt-shaped report sections such as `Current Waiting Point` or `Current Workflow Path`.
 - Incident-resolution reports are rendered deterministically from Camunda JSON.
 - Mutation command acceptance is not treated as success unless verification confirms the outcome.
+- Explicit bulk retry requests with multiple business identifiers are blocked if no workflow strategy matches the prompt, rather than falling back to a guessed mutation target.
 
 ## Local URLs
 
@@ -197,7 +203,9 @@ Most local behavior is controlled from [application.yaml](src/main/resources/app
 - [OrderWorkflowStrategy](src/main/java/com/shubham/dev/bpm_agent/strategy/OrderWorkflowStrategy.java)
   - current workflow-specific behavior
 - [WorkflowKnowledgeVectorStoreService](src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java)
-  - workflow knowledge indexing and retrieval
+  - workflow knowledge indexing and retrieval with explicit startup refresh
+- [BpmnKnowledgeExtractor](src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/BpmnKnowledgeExtractor.java)
+  - structured BPMN parsing for vector-store corpus building
 
 ## Documentation
 
@@ -216,6 +224,7 @@ Most local behavior is controlled from [application.yaml](src/main/resources/app
 
 - `searchProcessInstances` still searches by variable and does not yet enforce workflow `processId` at the tool level.
 - bulk retry is currently order-workflow-specific
+- multi-identifier retry requests without a matching workflow strategy are safely blocked, but there is not yet a generic cross-workflow batch resolution contract
 - the consultant UI is intentionally minimal and static
 
 ## Next Direction

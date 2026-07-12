@@ -124,6 +124,34 @@ class CamundaAgentChatServiceTest {
     }
 
     @Test
+    void orderWorkflowStrategyMatchesBareOrderIdentifiers() {
+        IncidentResolutionRuleCatalogService ruleCatalogService = mock(IncidentResolutionRuleCatalogService.class);
+        when(ruleCatalogService.findRulesForWorkflows(org.mockito.ArgumentMatchers.anySet())).thenReturn(List.of());
+        OrderWorkflowStrategy strategy = new OrderWorkflowStrategy(ruleCatalogService);
+
+        assertTrue(strategy.isApplicable("retry incidents for ORD-55421 and ORD-55422"));
+    }
+
+    @Test
+    void blocksBulkRetryWhenNoWorkflowStrategyMatchesMultipleIdentifiers() {
+        ChatClient.Builder chatClientBuilder = mock(ChatClient.Builder.class);
+        CamundaAgentChatService service = new CamundaAgentChatService(
+                chatClientBuilder,
+                mock(CamundaDiagnosticTools.class),
+                mock(WorkflowStrategyRegistry.class),
+                mock(CamundaToolDispatchService.class),
+                mock(CamundaDiagnosticReportService.class),
+                new ObjectMapper());
+
+        String response = service.handlePrompt("retry incidents for ORD-55421 and INV-99211");
+
+        assertTrue(response.contains("Retry is blocked because the request contains multiple business identifiers but no workflow strategy matched the prompt."));
+        assertTrue(response.contains("ORD-55421"));
+        assertTrue(response.contains("INV-99211"));
+        verify(chatClientBuilder, never()).build();
+    }
+
+    @Test
     void handlesBulkOrderIncidentRetryDeterministically() throws Exception {
         ChatClient.Builder chatClientBuilder = mock(ChatClient.Builder.class);
         when(chatClientBuilder.defaultSystem(org.mockito.ArgumentMatchers.anyString())).thenReturn(chatClientBuilder);

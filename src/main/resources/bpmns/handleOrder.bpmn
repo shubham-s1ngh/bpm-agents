@@ -7,7 +7,7 @@
     <bpmn:startEvent id="StartEvent_1" name="start">
       <bpmn:outgoing>Flow_13353nn</bpmn:outgoing>
     </bpmn:startEvent>
-    <bpmn:scriptTask id="Activity_1wvpf97" name="sanitize order payload">
+    <bpmn:scriptTask id="scriptTaskSanitizeOrderPayload" name="sanitize order payload">
       <bpmn:extensionElements>
         <zeebe:script expression="=if (orderId = null) then false else true" resultVariable="isValid" />
       </bpmn:extensionElements>
@@ -76,8 +76,8 @@
     <bpmn:endEvent id="Event_FulfillmentAborted" name="Fulfillment Aborted">
       <bpmn:incoming>Flow_ToAbortEnd</bpmn:incoming>
     </bpmn:endEvent>
-    <bpmn:sequenceFlow id="Flow_13353nn" sourceRef="StartEvent_1" targetRef="Activity_1wvpf97" />
-    <bpmn:sequenceFlow id="Flow_ToInv" sourceRef="Activity_1wvpf97" targetRef="subProcess_InventoryService" />
+    <bpmn:sequenceFlow id="Flow_13353nn" sourceRef="StartEvent_1" targetRef="scriptTaskSanitizeOrderPayload" />
+    <bpmn:sequenceFlow id="Flow_ToInv" sourceRef="scriptTaskSanitizeOrderPayload" targetRef="subProcess_InventoryService" />
     <bpmn:sequenceFlow id="Flow_ToPay" sourceRef="subProcess_InventoryService" targetRef="CallActivity_Payment" />
     <bpmn:sequenceFlow id="Flow_ToEval" sourceRef="CallActivity_Payment" targetRef="Activity_1did4oc" />
     <bpmn:sequenceFlow id="Flow_0ponopy" sourceRef="Activity_1did4oc" targetRef="Gateway_1yzizen" />
@@ -108,7 +108,7 @@
       <bpmndi:BPMNShape id="StartEvent_1_di" bpmnElement="StartEvent_1">
         <dc:Bounds x="182" y="142" width="36" height="36" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Activity_0zhjhn4_di" bpmnElement="Activity_1wvpf97">
+      <bpmndi:BPMNShape id="Activity_0zhjhn4_di" bpmnElement="scriptTaskSanitizeOrderPayload">
         <dc:Bounds x="270" y="120" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Activity_0bf1sv9_di" bpmnElement="subProcess_InventoryService">
@@ -129,9 +129,6 @@
       <bpmndi:BPMNShape id="Activity_1roammb_di" bpmnElement="CallActivity_Advanced">
         <dc:Bounds x="910" y="120" width="100" height="80" />
       </bpmndi:BPMNShape>
-      <bpmndi:BPMNShape id="Activity_15gjcvj_di" bpmnElement="CallActivity_Regular">
-        <dc:Bounds x="900" y="340" width="100" height="80" />
-      </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Gateway_Merge_di" bpmnElement="Gateway_Merge" isMarkerVisible="true">
         <dc:Bounds x="1065" y="135" width="50" height="50" />
         <bpmndi:BPMNLabel>
@@ -149,6 +146,9 @@
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_FulfillmentAborted_di" bpmnElement="Event_FulfillmentAborted">
         <dc:Bounds x="562" y="402" width="36" height="36" />
+      </bpmndi:BPMNShape>
+      <bpmndi:BPMNShape id="Activity_15gjcvj_di" bpmnElement="CallActivity_Regular">
+        <dc:Bounds x="900" y="340" width="100" height="80" />
       </bpmndi:BPMNShape>
       <bpmndi:BPMNShape id="Event_PaymentError_Trap_di" bpmnElement="Event_PaymentError_Trap">
         <dc:Bounds x="582" y="182" width="36" height="36" />

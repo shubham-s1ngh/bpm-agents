@@ -48,6 +48,112 @@ class CamundaDiagnosticReportServiceTest {
     }
 
     @Test
+    void buildsWaitingPointContractForWaitingPrompts() {
+        String contract = reportService.buildStableReportContract(
+                false,
+                reportService.detectReadOnlyReportIntent("where this order id ORD-55448 is waiting"));
+
+        assertTrue(contract.contains("## Current Waiting Point"));
+        assertTrue(contract.contains("identify the current active element or active child process"));
+        assertFalse(contract.contains("## Current Workflow Path"));
+    }
+
+    @Test
+    void buildsWorkflowPathContractForPathPrompts() {
+        String contract = reportService.buildStableReportContract(
+                false,
+                reportService.detectReadOnlyReportIntent("explain the current workflow path for order ORD-55448"));
+
+        assertTrue(contract.contains("## Current Workflow Path"));
+        assertTrue(contract.contains("summarize the verified completed path and the current active stage"));
+        assertFalse(contract.contains("## Current Waiting Point"));
+    }
+
+    @Test
+    void detectsReadOnlyIntentFromPrompt() {
+        assertTrue(reportService.detectReadOnlyReportIntent("where this order id ORD-55448 is waiting")
+                == CamundaDiagnosticReportService.ReadOnlyReportIntent.WAITING_POINT);
+        assertTrue(reportService.detectReadOnlyReportIntent("explain the current workflow path for order ORD-55448")
+                == CamundaDiagnosticReportService.ReadOnlyReportIntent.WORKFLOW_PATH);
+        assertTrue(reportService.detectReadOnlyReportIntent("check for this order id ORD-55448")
+                == CamundaDiagnosticReportService.ReadOnlyReportIntent.GENERIC);
+    }
+
+    @Test
+    void rendersDeterministicWaitingPointSummaryWithoutRepeatingDuplicateActiveSteps() {
+        String payload = """
+                {
+                  "processInstance": {
+                    "processInstanceKey": "2251799814151644",
+                    "processDefinitionId": "handleOrderId",
+                    "processDefinitionName": "handle order",
+                    "state": "ACTIVE"
+                  },
+                  "activeIncidents": [],
+                  "runtimeVariables": [
+                    { "name": "path", "value": "regular" }
+                  ],
+                  "activeSteps": [
+                    { "elementId": "CallActivity_Regular", "elementName": "regular track", "elementType": "CALL_ACTIVITY", "state": "COMPLETED" },
+                    { "elementId": "Gateway_Merge", "elementName": "merge", "elementType": "EXCLUSIVE_GATEWAY", "state": "COMPLETED" },
+                    { "elementId": "Task_SendEmail", "elementName": "Send Item Dispatch Alert", "elementType": "SERVICE_TASK", "state": "ACTIVE" },
+                    { "elementId": "Task_SendEmail", "elementName": "Send Item Dispatch Alert", "elementType": "SERVICE_TASK", "state": "ACTIVE" }
+                  ],
+                  "childProcessDiagnostics": []
+                }
+                """;
+
+        String report = reportService.renderDeterministicIntentAwareDiagnosticReport(
+                payload,
+                CamundaDiagnosticReportService.ReadOnlyReportIntent.WAITING_POINT);
+
+        assertTrue(report.contains("## Current Waiting Point"));
+        assertTrue(report.contains("**Current Active Element:** Send Item Dispatch Alert (Task_SendEmail) / SERVICE_TASK / ACTIVE"));
+        assertTrue(report.contains("**Parallel Active Executions:** 2"));
+        assertTrue(report.contains("**Last Completed Element Before Wait:** merge (Gateway_Merge) / EXCLUSIVE_GATEWAY / COMPLETED"));
+        assertFalse(report.contains("Send Item Dispatch Alert / SERVICE_TASK / ACTIVE\n- **Current Active Element:**"));
+    }
+
+    @Test
+    void rendersDeterministicWorkflowPathSummaryWithCondensedActiveStage() {
+        String payload = """
+                {
+                  "processInstance": {
+                    "processInstanceKey": "2251799814151644",
+                    "processDefinitionId": "handleOrderId",
+                    "processDefinitionName": "handle order",
+                    "state": "ACTIVE"
+                  },
+                  "activeIncidents": [],
+                  "runtimeVariables": [
+                    { "name": "path", "value": "regular" }
+                  ],
+                  "activeSteps": [
+                    { "elementId": "StartEvent_1", "elementName": "start", "elementType": "START_EVENT", "state": "COMPLETED" },
+                    { "elementId": "Activity_1wvpf97", "elementName": "sanitize order payload", "elementType": "SCRIPT_TASK", "state": "COMPLETED" },
+                    { "elementId": "CallActivity_Regular", "elementName": "regular track", "elementType": "CALL_ACTIVITY", "state": "COMPLETED" },
+                    { "elementId": "Task_SendEmail", "elementName": "Send Item Dispatch Alert", "elementType": "SERVICE_TASK", "state": "ACTIVE" },
+                    { "elementId": "Task_SendEmail", "elementName": "Send Item Dispatch Alert", "elementType": "SERVICE_TASK", "state": "ACTIVE" }
+                  ],
+                  "childProcessDiagnostics": []
+                }
+                """;
+
+        String report = reportService.renderDeterministicIntentAwareDiagnosticReport(
+                payload,
+                CamundaDiagnosticReportService.ReadOnlyReportIntent.WORKFLOW_PATH);
+
+        assertTrue(report.contains("## Current Workflow Path"));
+        assertTrue(report.contains("**Completed Stages:**"));
+        assertTrue(report.contains("1. start [START_EVENT]"));
+        assertTrue(report.contains("2. sanitize order payload [SCRIPT_TASK]"));
+        assertTrue(report.contains("3. regular track [CALL_ACTIVITY]"));
+        assertTrue(report.contains("**Current Active Stage:** Send Item Dispatch Alert [SERVICE_TASK]"));
+        assertTrue(report.contains("**Current BPMN Element ID:** Task_SendEmail"));
+        assertTrue(report.contains("**Parallel Active Executions:** 2"));
+    }
+
+    @Test
     void rendersIncidentResolutionReportDeterministicallyWithAllResolvedChildren() {
         String payload = """
                 {

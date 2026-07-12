@@ -14,6 +14,7 @@ import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.util.Locale;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,10 +58,15 @@ public class CamundaDiagnosticReportService {
             return renderDeterministicIncidentResolutionReport(diagnosticPayload);
         }
 
+        ReadOnlyReportIntent readOnlyReportIntent = detectReadOnlyReportIntent(userPrompt);
+        if (readOnlyReportIntent != ReadOnlyReportIntent.GENERIC) {
+            return renderDeterministicIntentAwareDiagnosticReport(diagnosticPayload, readOnlyReportIntent);
+        }
+
         String dynamicReportContract = strategyOpt.map(WorkflowContextStrategy::generateReportStructuringInstructions)
                 .orElse("");
         String retrievedWorkflowKnowledge = workflowKnowledgeVectorStoreService.fetchRelevantContext(userPrompt, strategyOpt);
-        String stableReportContract = buildStableReportContract(incidentResolutionPayload);
+        String stableReportContract = buildStableReportContract(incidentResolutionPayload, readOnlyReportIntent);
 
         ChatClient reportChatClient = chatClientBuilder
                 .defaultSystem("""
@@ -149,6 +155,10 @@ public class CamundaDiagnosticReportService {
     }
 
     String buildStableReportContract(boolean incidentResolutionPayload) {
+        return buildStableReportContract(incidentResolutionPayload, ReadOnlyReportIntent.GENERIC);
+    }
+
+    String buildStableReportContract(boolean incidentResolutionPayload, ReadOnlyReportIntent readOnlyReportIntent) {
         if (incidentResolutionPayload) {
             return """
                     Return markdown with this exact heading order:
@@ -174,6 +184,51 @@ public class CamundaDiagnosticReportService {
                     """;
         }
 
+        if (readOnlyReportIntent == ReadOnlyReportIntent.WAITING_POINT) {
+            return """
+                    Return markdown with this exact heading order:
+                    1. `# Diagnostic Report`
+                    2. `## Current Waiting Point`
+                    3. `## Process Instance Overview`
+                    4. `## Variables`
+                    5. `## Flow Elements`
+                    6. `## Child Processes` only when child processes exist
+                    7. `## Active Incidents` only when active incidents exist
+
+                    Formatting rules:
+                    - Use bullets, not tables.
+                    - Use one bullet per fact.
+                    - Under `## Current Waiting Point`, identify the current active element or active child process if Camunda evidence provides one.
+                    - If the workflow is active and no active element was returned, say that Camunda did not return a current waiting element.
+                    - You may summarize the completed stages that happened immediately before the current waiting point, but only when supported by evidence and retrieved BPMN context.
+                    - Under `## Process Instance Overview`, include both the direct root incident count and the total process-tree incident count when the evidence digest provides them.
+                    - Do not add sections such as `Camunda State Semantics`, `Process Overview`, `Routing Interpretation`, or `Remediation Action`.
+                    - Include incident state explicitly for every incident shown.
+                    """;
+        }
+
+        if (readOnlyReportIntent == ReadOnlyReportIntent.WORKFLOW_PATH) {
+            return """
+                    Return markdown with this exact heading order:
+                    1. `# Diagnostic Report`
+                    2. `## Current Workflow Path`
+                    3. `## Process Instance Overview`
+                    4. `## Variables`
+                    5. `## Flow Elements`
+                    6. `## Child Processes` only when child processes exist
+                    7. `## Active Incidents` only when active incidents exist
+
+                    Formatting rules:
+                    - Use bullets, not tables.
+                    - Use one bullet per fact.
+                    - Under `## Current Workflow Path`, summarize the verified completed path and the current active stage.
+                    - Use retrieved BPMN knowledge only to explain how the verified path fits the workflow structure, never to invent extra runtime state.
+                    - Under `## Process Instance Overview`, include both the direct root incident count and the total process-tree incident count when the evidence digest provides them.
+                    - Do not add sections such as `Camunda State Semantics`, `Process Overview`, `Routing Interpretation`, or `Remediation Action`.
+                    - Include incident state explicitly for every incident shown.
+                    """;
+        }
+
         return """
                 Return markdown with this exact heading order:
                 1. `# Diagnostic Report`
@@ -192,6 +247,25 @@ public class CamundaDiagnosticReportService {
                 - Explain routing facts inline under the relevant section instead of creating a separate heading.
                 - Include incident state explicitly for every incident shown.
                 """;
+    }
+
+    ReadOnlyReportIntent detectReadOnlyReportIntent(String userPrompt) {
+        if (!StringUtils.hasText(userPrompt)) {
+            return ReadOnlyReportIntent.GENERIC;
+        }
+
+        String normalizedPrompt = userPrompt.toLowerCase(Locale.ROOT);
+        if (normalizedPrompt.contains("where") && normalizedPrompt.contains("wait")) {
+            return ReadOnlyReportIntent.WAITING_POINT;
+        }
+        if (normalizedPrompt.contains("current workflow path")
+                || normalizedPrompt.contains("explain the current workflow path")
+                || normalizedPrompt.contains("what path")
+                || normalizedPrompt.contains("which path")
+                || normalizedPrompt.contains("current stage")) {
+            return ReadOnlyReportIntent.WORKFLOW_PATH;
+        }
+        return ReadOnlyReportIntent.GENERIC;
     }
 
     boolean isIncidentResolutionPayload(CamundaEvidenceSnapshot snapshot) {
@@ -276,6 +350,51 @@ public class CamundaDiagnosticReportService {
         }
     }
 
+    String renderDeterministicIntentAwareDiagnosticReport(String diagnosticPayload, ReadOnlyReportIntent readOnlyReportIntent) {
+        try {
+            JsonNode rootDiagnostic = objectMapper.readTree(diagnosticPayload);
+            JsonNode processInstance = rootDiagnostic.path("processInstance");
+
+            StringBuilder report = new StringBuilder("# Diagnostic Report\n\n");
+            if (readOnlyReportIntent == ReadOnlyReportIntent.WAITING_POINT) {
+                appendCurrentWaitingPointSection(report, rootDiagnostic);
+            } else if (readOnlyReportIntent == ReadOnlyReportIntent.WORKFLOW_PATH) {
+                appendCurrentWorkflowPathSection(report, rootDiagnostic);
+            }
+
+            report.append("## Process Instance Overview\n");
+            appendBullet(report, "Process Instance Key",
+                    evidenceDigestService.firstText(processInstance, "processInstanceKey", "key",
+                            "rootProcessInstanceKey"));
+            appendBullet(report, "Process Definition ID",
+                    evidenceDigestService.firstText(processInstance, "processDefinitionId"));
+            appendBullet(report, "Process Definition Name",
+                    evidenceDigestService.firstText(processInstance, "processDefinitionName"));
+            appendBullet(report, "State", evidenceDigestService.firstText(processInstance, "state"));
+            int directIncidentCount = rootDiagnostic.path("activeIncidents").isArray()
+                    ? rootDiagnostic.path("activeIncidents").size()
+                    : 0;
+            appendBullet(report, "Incident Count", String.valueOf(directIncidentCount));
+            appendBullet(report, "Direct Incident Count on Root Instance", String.valueOf(directIncidentCount));
+            appendBullet(report, "Total Process-Tree Incident Count", String.valueOf(countIncidentsAcrossTree(rootDiagnostic)));
+            report.append('\n');
+
+            appendVariablesSection(report, rootDiagnostic.path("runtimeVariables"));
+            appendFlowElementsSection(report, rootDiagnostic.path("activeSteps"));
+            appendChildProcessesSection(report, rootDiagnostic.path("childProcessDiagnostics"));
+
+            JsonNode incidents = rootDiagnostic.path("activeIncidents");
+            if (incidents.isArray() && !incidents.isEmpty()) {
+                report.append("## Active Incidents\n");
+                appendIncidentList(report, incidents);
+            }
+
+            return report.toString().trim();
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to render deterministic read-only diagnostic report", e);
+        }
+    }
+
     private String stripMarkdownFence(String modelOutput) {
         String trimmed = modelOutput.trim();
         if (trimmed.startsWith("```")) {
@@ -304,6 +423,88 @@ public class CamundaDiagnosticReportService {
         }
     }
 
+    private void appendCurrentWaitingPointSection(StringBuilder report, JsonNode rootDiagnostic) {
+        report.append("## Current Waiting Point\n");
+        List<StepSummary> activeSteps = summarizeSteps(rootDiagnostic.path("activeSteps"), "ACTIVE");
+        if (activeSteps.isEmpty()) {
+            report.append("- Camunda did not return an active waiting element for this workflow instance.\n\n");
+            return;
+        }
+
+        StepSummary primary = activeSteps.get(0);
+        report.append("- **Current Active Element:** ")
+                .append(primary.readableLabel())
+                .append('\n');
+        if (primary.count() > 1) {
+            report.append("- **Parallel Active Executions:** ")
+                    .append(primary.count())
+                    .append('\n');
+        }
+
+        List<StepSummary> otherActiveSteps = activeSteps.stream().skip(1).toList();
+        if (!otherActiveSteps.isEmpty()) {
+            report.append("- **Related Active Elements:** ")
+                    .append(joinLabels(otherActiveSteps))
+                    .append('\n');
+        }
+
+        StepSummary lastCompleted = summarizeSteps(rootDiagnostic.path("activeSteps"), "COMPLETED").stream()
+                .reduce((first, second) -> second)
+                .orElse(null);
+        if (lastCompleted != null) {
+            report.append("- **Last Completed Element Before Wait:** ")
+                    .append(lastCompleted.readableLabel())
+                    .append('\n');
+        }
+        report.append('\n');
+    }
+
+    private void appendCurrentWorkflowPathSection(StringBuilder report, JsonNode rootDiagnostic) {
+        report.append("## Current Workflow Path\n");
+        List<StepSummary> completedSteps = summarizeSteps(rootDiagnostic.path("activeSteps"), "COMPLETED");
+        if (!completedSteps.isEmpty()) {
+            report.append("- **Completed Stages:**\n");
+            for (int index = 0; index < completedSteps.size(); index++) {
+                StepSummary step = completedSteps.get(index);
+                report.append("  ")
+                        .append(index + 1)
+                        .append(". ")
+                        .append(step.summaryLabel())
+                        .append('\n');
+            }
+        } else {
+            report.append("- **Completed Stages:** Camunda did not return completed flow elements for this workflow instance.\n");
+        }
+
+        List<StepSummary> activeSteps = summarizeSteps(rootDiagnostic.path("activeSteps"), "ACTIVE");
+        if (!activeSteps.isEmpty()) {
+            StepSummary primary = activeSteps.get(0);
+            report.append("- **Current Active Stage:** ")
+                    .append(primary.summaryLabel())
+                    .append('\n');
+            if (StringUtils.hasText(primary.elementId()) && !primary.summaryLabel().contains(primary.elementId())) {
+                report.append("- **Current BPMN Element ID:** ")
+                        .append(primary.elementId())
+                        .append('\n');
+            }
+            if (primary.count() > 1) {
+                report.append("- **Parallel Active Executions:** ")
+                        .append(primary.count())
+                        .append('\n');
+            }
+
+            List<StepSummary> otherActiveSteps = activeSteps.stream().skip(1).toList();
+            if (!otherActiveSteps.isEmpty()) {
+                report.append("- **Related Active Elements:** ")
+                        .append(joinLabels(otherActiveSteps))
+                        .append('\n');
+            }
+        } else {
+            report.append("- **Current Active Stage:** Camunda did not return an active stage for this workflow instance.\n");
+        }
+        report.append('\n');
+    }
+
     private void appendVariablesSection(StringBuilder report, JsonNode variables) {
         if (!variables.isArray() || variables.isEmpty()) {
             return;
@@ -326,16 +527,19 @@ public class CamundaDiagnosticReportService {
         }
 
         report.append("## Flow Elements\n");
-        for (JsonNode step : steps) {
+        for (StepSummary step : summarizeSteps(steps, null)) {
             report.append("- **Element ")
-                    .append(evidenceDigestService.firstText(step, "elementId", "flowNodeId"))
+                    .append(step.elementId())
                     .append(" / ")
-                    .append(evidenceDigestService.firstText(step, "elementName", "flowNodeName", "name"))
+                    .append(step.elementName())
                     .append(" / ")
-                    .append(evidenceDigestService.firstText(step, "elementType", "flowNodeType", "type"))
+                    .append(step.elementType())
                     .append(" / ")
-                    .append(evidenceDigestService.firstText(step, "state"))
-                    .append("**\n");
+                    .append(step.state());
+            if (step.count() > 1) {
+                report.append(" / count ").append(step.count());
+            }
+            report.append("**\n");
         }
         report.append('\n');
     }
@@ -391,5 +595,90 @@ public class CamundaDiagnosticReportService {
             report.append("not returned by Camunda");
         }
         report.append('\n');
+    }
+
+    private List<StepSummary> summarizeSteps(JsonNode steps, String requiredState) {
+        if (!steps.isArray() || steps.isEmpty()) {
+            return List.of();
+        }
+
+        java.util.LinkedHashMap<String, StepSummary> summaries = new java.util.LinkedHashMap<>();
+        for (JsonNode step : steps) {
+            String state = evidenceDigestService.firstText(step, "state");
+            if (StringUtils.hasText(requiredState) && !requiredState.equalsIgnoreCase(state)) {
+                continue;
+            }
+            String elementId = evidenceDigestService.firstText(step, "elementId", "flowNodeId");
+            String elementName = evidenceDigestService.firstText(step, "elementName", "flowNodeName", "name");
+            String elementType = evidenceDigestService.firstText(step, "elementType", "flowNodeType", "type");
+            String key = String.join("|", elementId, elementName, elementType, state);
+            summaries.compute(key, (ignored, existing) -> existing == null
+                    ? new StepSummary(elementId, elementName, elementType, state, 1)
+                    : existing.increment());
+        }
+        return List.copyOf(summaries.values());
+    }
+
+    private String joinLabels(List<StepSummary> steps) {
+        return steps.stream()
+                .map(StepSummary::readableLabelWithCount)
+                .reduce((left, right) -> left + " -> " + right)
+                .orElse("not returned by Camunda");
+    }
+
+    private int countIncidentsAcrossTree(JsonNode diagnostic) {
+        if (diagnostic == null || diagnostic.isMissingNode() || diagnostic.isNull()) {
+            return 0;
+        }
+
+        int count = diagnostic.path("activeIncidents").isArray() ? diagnostic.path("activeIncidents").size() : 0;
+        JsonNode children = diagnostic.path("childProcessDiagnostics");
+        if (children.isArray()) {
+            for (JsonNode child : children) {
+                count += countIncidentsAcrossTree(child);
+            }
+        }
+        return count;
+    }
+
+    enum ReadOnlyReportIntent {
+        GENERIC,
+        WAITING_POINT,
+        WORKFLOW_PATH
+    }
+
+    record StepSummary(String elementId, String elementName, String elementType, String state, int count) {
+
+        StepSummary increment() {
+            return new StepSummary(elementId, elementName, elementType, state, count + 1);
+        }
+
+        String label() {
+            return "%s / %s / %s / %s".formatted(elementId, elementName, elementType, state);
+        }
+
+        String labelWithCount() {
+            return count > 1 ? label() + " x" + count : label();
+        }
+
+        String readableLabel() {
+            String preferredName = StringUtils.hasText(elementName) ? elementName : elementId;
+            if (StringUtils.hasText(elementId) && !preferredName.equals(elementId)) {
+                return "%s (%s) / %s / %s".formatted(preferredName, elementId, elementType, state);
+            }
+            return "%s / %s / %s".formatted(preferredName, elementType, state);
+        }
+
+        String readableLabelWithCount() {
+            return count > 1 ? readableLabel() + " x" + count : readableLabel();
+        }
+
+        String summaryLabel() {
+            String preferredName = StringUtils.hasText(elementName) ? elementName : elementId;
+            if (StringUtils.hasText(elementType)) {
+                return "%s [%s]".formatted(preferredName, elementType);
+            }
+            return preferredName;
+        }
     }
 }

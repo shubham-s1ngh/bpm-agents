@@ -71,6 +71,7 @@ Incident mutation support was redesigned and hardened:
 Key behaviors:
 - mutation allowed only on explicit retry intent
 - workflow strategy policy consulted before single-order and bulk-order retry mutation
+- explicit multi-identifier retry prompts are now blocked when no workflow strategy matches, instead of falling back to a guessed process-instance mutation target
 - post-resolution verification polling
 - active-incident filtering by incident state
 - readable mutation outcome reports
@@ -128,6 +129,7 @@ Prompts such as:
 now:
 - find the active process instance deterministically
 - resolve incidents at the process-instance level
+- block ambiguous multi-identifier retry prompts when workflow context is missing
 - poll for stabilization
 - report retry outcome with grounded current-state diagnostics
 

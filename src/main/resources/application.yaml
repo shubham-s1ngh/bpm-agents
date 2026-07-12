@@ -111,4 +111,4 @@ app:
     immediate-incident-on-5xx: ${APP_MOCK_SERVICES_IMMEDIATE_INCIDENT_ON_5XX:true}
 
 # Minimal admin UI for consultant-managed incident rules and BPMN-assisted draft generation:
-#   http://localhost:8081/admin/incident-rules/
+#   http://localhost:8081/admin/incident-rules/index.html
