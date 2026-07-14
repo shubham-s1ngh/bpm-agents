@@ -46,6 +46,7 @@ This project is useful for:
 - vector-backed workflow knowledge retrieval for better explanation
   - startup-initialized, replace-and-rebuild index lifecycle for consultant rule and BPMN knowledge
   - structured BPMN indexing for process summaries, call activities, service tasks, gateways, and boundary events
+  - one normalized retrieval document per persisted incident rule with workflow scope, match conditions, and resolution metadata
 
 ## Current Release Scope
 

@@ -268,6 +268,7 @@ sequenceDiagram
 - `src/main/java/com/shubham/dev/bpm_agent/strategy/retrieval/WorkflowKnowledgeVectorStoreService.java`
   - Uses one production retrieval contract backed by the injected workflow knowledge `VectorStore`, registered workflow strategies, and persisted consultant-managed rules.
   - Builds retrievable workflow documents for strategy context, persisted rules, and structured BPMN knowledge chunks.
+  - Indexes one normalized retrieval document per persisted incident rule so read-only explanation can retrieve workflow scope, match conditions, and resolution metadata explicitly.
   - Rebuilds the retrieval corpus explicitly at startup and refreshes it after rule CRUD operations.
   - Uses replace-and-rebuild refresh semantics so the stored workflow knowledge remains deterministic and idempotent across updates.
   - Supplies similarity-searched workflow context only for LLM explanation, not for live runtime evidence.

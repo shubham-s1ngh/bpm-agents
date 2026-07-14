@@ -23,6 +23,7 @@ import org.springframework.util.StringUtils;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -125,11 +126,7 @@ public class WorkflowKnowledgeVectorStoreService {
             documentsById.put("rule-" + entity.getId(), Document.builder()
                     .id("rule-" + entity.getId())
                     .text(buildRuleKnowledgeText(entity))
-                    .metadata(Map.of(
-                            "workflowProcessDefinitionId", entity.getWorkflowProcessDefinitionId(),
-                            "knowledgeType", "incident-rule",
-                            "ruleId", entity.getId()
-                    ))
+                    .metadata(buildRuleMetadata(entity))
                     .build());
         }
 
@@ -390,25 +387,75 @@ public class WorkflowKnowledgeVectorStoreService {
     }
 
     private String buildRuleKnowledgeText(IncidentResolutionRuleEntity entity) {
+        List<String> normalizedErrorTypes = normalizeDelimitedValues(entity.getErrorTypes(), true);
+        List<String> normalizedHttpStatusCodes = normalizeDelimitedValues(entity.getHttpStatusCodes(), false);
+        List<String> normalizedMessageTokens = normalizeDelimitedValues(entity.getMessageContains(), false);
+
+        String errorTypeSummary = normalizedErrorTypes.isEmpty()
+                ? "any error type"
+                : String.join(", ", normalizedErrorTypes);
+        String httpStatusSummary = normalizedHttpStatusCodes.isEmpty()
+                ? "any HTTP status"
+                : normalizedHttpStatusCodes.stream()
+                .map(code -> "HTTP " + code)
+                .reduce((left, right) -> left + ", " + right)
+                .orElse("any HTTP status");
+        String messageTokenSummary = normalizedMessageTokens.isEmpty()
+                ? "no message token filter"
+                : String.join(", ", normalizedMessageTokens);
+
         return """
+                Incident resolution rule
                 Workflow process definition: %s
+                Rule id: %s
+                Priority: %s
+                Enabled: %s
                 Rule instruction: %s
-                Error types: %s
-                HTTP status codes: %s
-                Message contains: %s
-                Resolution mode: %s
-                Reason: %s
-                Guidance: %s
+                Match summary:
+                - Error types: %s
+                - HTTP status codes: %s
+                - Message tokens: %s
+                Resolution summary:
+                - Resolution mode: %s
+                - Reason: %s
+                - Guidance: %s
                 """.formatted(
                 entity.getWorkflowProcessDefinitionId(),
+                defaultText(String.valueOf(entity.getId())),
+                defaultText(String.valueOf(entity.getPriority())),
+                entity.isEnabled(),
                 defaultText(entity.getInstruction()),
-                defaultText(entity.getErrorTypes()),
-                defaultText(entity.getHttpStatusCodes()),
-                defaultText(entity.getMessageContains()),
+                errorTypeSummary,
+                httpStatusSummary,
+                messageTokenSummary,
                 defaultText(entity.getResolutionMode()),
                 defaultText(entity.getReason()),
                 defaultText(entity.getUserFacingGuidance())
         ).trim();
+    }
+
+    private Map<String, Object> buildRuleMetadata(IncidentResolutionRuleEntity entity) {
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("workflowProcessDefinitionId", entity.getWorkflowProcessDefinitionId());
+        metadata.put("knowledgeType", "incident-rule");
+        metadata.put("ruleId", entity.getId());
+        metadata.put("resolutionMode", defaultText(entity.getResolutionMode()));
+        metadata.put("priority", entity.getPriority());
+        metadata.put("enabled", entity.isEnabled());
+        return Map.copyOf(metadata);
+    }
+
+    private List<String> normalizeDelimitedValues(String rawValue, boolean lowercase) {
+        if (!StringUtils.hasText(rawValue)) {
+            return List.of();
+        }
+
+        return StringUtils.commaDelimitedListToSet(rawValue).stream()
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .map(value -> lowercase ? value.toLowerCase(java.util.Locale.ROOT) : value)
+                .sorted(Comparator.naturalOrder())
+                .toList();
     }
 
     private String defaultText(String value) {
