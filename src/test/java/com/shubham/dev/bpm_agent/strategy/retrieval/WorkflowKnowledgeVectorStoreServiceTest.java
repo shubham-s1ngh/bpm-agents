@@ -1,6 +1,7 @@
 package com.shubham.dev.bpm_agent.strategy.retrieval;
 
 import com.shubham.dev.bpm_agent.strategy.WorkflowContextStrategy;
+import com.shubham.dev.bpm_agent.strategy.persistence.IncidentResolutionRuleEntity;
 import com.shubham.dev.bpm_agent.strategy.persistence.IncidentResolutionRuleRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.document.Document;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
@@ -147,6 +149,70 @@ class WorkflowKnowledgeVectorStoreServiceTest {
     }
 
     @Test
+    void indexesOneNormalizedRuleDocumentPerPersistedRule() {
+        VectorStore vectorStore = mock(VectorStore.class);
+        IncidentResolutionRuleRepository repository = mock(IncidentResolutionRuleRepository.class);
+        WorkflowContextStrategy strategy = mock(WorkflowContextStrategy.class);
+
+        when(strategy.getProcessDefinitionId()).thenReturn("handleOrderId");
+        when(strategy.primaryBusinessIdentifierVariable()).thenReturn("orderId");
+        when(strategy.generateBusinessIdentifierInstructions()).thenReturn("Normalize order references to orderId.");
+        when(strategy.generateBpmnContextInstructions()).thenReturn("Order workflow with inventory, payment, fulfillment, and notification.");
+        when(strategy.generateReportStructuringInstructions()).thenReturn("Mention child processes inline.");
+
+        IncidentResolutionRuleEntity rule = new IncidentResolutionRuleEntity();
+        rule.setWorkflowProcessDefinitionId("subProcess_PaymentGateway");
+        rule.setPriority(20);
+        rule.setEnabled(true);
+        rule.setInstruction("Block payment bad-request retries.");
+        rule.setErrorTypes("JOB_NO_RETRIES");
+        rule.setHttpStatusCodes("400, 422");
+        rule.setMessageContains("payment-charge, bad request, invalid card token");
+        rule.setResolutionMode("BLOCKED");
+        rule.setReason("Payment payload must be corrected before retry.");
+        rule.setUserFacingGuidance("Correct the payment request and retry later.");
+
+        setEntityId(rule, 99L);
+        when(repository.findAllByOrderByWorkflowProcessDefinitionIdAscPriorityAscIdAsc()).thenReturn(List.of(rule));
+
+        final List<Document>[] capturedDocuments = new List[1];
+        doAnswer(invocation -> {
+            capturedDocuments[0] = List.copyOf(invocation.getArgument(0));
+            return null;
+        }).when(vectorStore).add(any());
+
+        WorkflowKnowledgeVectorStoreService service = new WorkflowKnowledgeVectorStoreService(
+                vectorStore,
+                List.of(strategy),
+                repository,
+                new BpmnKnowledgeExtractor(),
+                true,
+                4,
+                "build/test-vector-store.json"
+        );
+
+        service.initializeIndexOnStartup();
+
+        Document ruleDocument = capturedDocuments[0].stream()
+                .filter(document -> "rule-99".equals(document.getId()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("incident-rule", ruleDocument.getMetadata().get("knowledgeType"));
+        assertEquals("subProcess_PaymentGateway", ruleDocument.getMetadata().get("workflowProcessDefinitionId"));
+        assertEquals(99L, ruleDocument.getMetadata().get("ruleId"));
+        assertEquals("BLOCKED", ruleDocument.getMetadata().get("resolutionMode"));
+        assertTrue(ruleDocument.getText().contains("Incident resolution rule"));
+        assertTrue(ruleDocument.getText().contains("Rule id: 99"));
+        assertTrue(ruleDocument.getText().contains("Priority: 20"));
+        assertTrue(ruleDocument.getText().contains("- Error types: job_no_retries"));
+        assertTrue(ruleDocument.getText().contains("- HTTP status codes: HTTP 400, HTTP 422"));
+        assertTrue(ruleDocument.getText().contains("- Message tokens: bad request, invalid card token, payment-charge"));
+        assertTrue(ruleDocument.getText().contains("- Resolution mode: BLOCKED"));
+        assertTrue(ruleDocument.getText().contains("- Reason: Payment payload must be corrected before retry."));
+    }
+
+    @Test
     void refreshIndexReplacesExistingCorpusBeforeReaddingDocuments() {
         VectorStore vectorStore = mock(VectorStore.class);
         IncidentResolutionRuleRepository repository = mock(IncidentResolutionRuleRepository.class);
@@ -176,5 +242,15 @@ class WorkflowKnowledgeVectorStoreServiceTest {
         callOrder.verify(vectorStore).delete(argThat((List<String> ids) ->
                 ids.size() == 1 && ids.contains("strategy-context-syntheticFlow")));
         callOrder.verify(vectorStore).add(any());
+    }
+
+    private void setEntityId(IncidentResolutionRuleEntity entity, Long id) {
+        try {
+            var field = IncidentResolutionRuleEntity.class.getDeclaredField("id");
+            field.setAccessible(true);
+            field.set(entity, id);
+        } catch (ReflectiveOperationException exception) {
+            throw new AssertionError("Failed to set rule entity id for test setup", exception);
+        }
     }
 }
