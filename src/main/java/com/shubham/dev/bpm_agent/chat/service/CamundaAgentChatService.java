@@ -16,7 +16,6 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.InMemoryChatMemoryRepository;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.ai.chat.prompt.ChatOptions;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -49,6 +48,7 @@ public class CamundaAgentChatService {
     private final WorkflowStrategyRegistry strategyRegistry;
     private final CamundaToolDispatchService toolDispatchService;
     private final CamundaDiagnosticReportService diagnosticReportService;
+    private final ChatRuntimeOptionsFactory chatRuntimeOptionsFactory;
     private final ObjectMapper objectMapper;
 
     private final InMemoryChatMemoryRepository memoryRepository = new InMemoryChatMemoryRepository();
@@ -62,12 +62,14 @@ public class CamundaAgentChatService {
                                    WorkflowStrategyRegistry strategyRegistry,
                                    CamundaToolDispatchService toolDispatchService,
                                    CamundaDiagnosticReportService diagnosticReportService,
+                                   ChatRuntimeOptionsFactory chatRuntimeOptionsFactory,
                                    ObjectMapper objectMapper) {
         this.chatClientBuilder = chatClientBuilder;
         this.diagnosticTools = diagnosticTools;
         this.strategyRegistry = strategyRegistry;
         this.toolDispatchService = toolDispatchService;
         this.diagnosticReportService = diagnosticReportService;
+        this.chatRuntimeOptionsFactory = chatRuntimeOptionsFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -153,15 +155,17 @@ public class CamundaAgentChatService {
             log.info("[AGENT LOOP - STEP {}] Dispatching active execution context stream to Qwen...", step);
 
             ChatOptions runtimeOptions = forceTextMode
-                    ? OllamaChatOptions.builder().format(null).build()
-                    : OllamaChatOptions.builder().format("json").build();
+                    ? chatRuntimeOptionsFactory.textModeOptions().orElse(null)
+                    : chatRuntimeOptionsFactory.jsonModeOptions();
 
-            String modelOutput = executionChatClient.prompt()
+            var promptSpec = executionChatClient.prompt()
                     .user(currentPromptInput)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId))
-                    .options(runtimeOptions)
-                    .call()
-                    .content();
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId));
+            if (runtimeOptions != null) {
+                promptSpec = promptSpec.options(runtimeOptions);
+            }
+
+            String modelOutput = promptSpec.call().content();
 
             log.info("[AGENT LOOP - STEP {}] Model Response:\n{}", step, modelOutput);
 

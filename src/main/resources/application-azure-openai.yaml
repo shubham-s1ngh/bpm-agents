@@ -1,0 +1,20 @@
+spring:
+  config:
+    activate:
+      on-profile: azure-openai
+  ai:
+    model:
+      chat: azure-openai
+      embedding: azure-openai
+    azure:
+      openai:
+        endpoint: ${AZURE_OPENAI_ENDPOINT}
+        api-key: ${AZURE_OPENAI_API_KEY}
+        chat:
+          options:
+            deployment-name: ${AZURE_OPENAI_CHAT_DEPLOYMENT:gpt-4.1-mini}
+            temperature: ${AZURE_OPENAI_TEMPERATURE:0.0}
+            max-tokens: ${AZURE_OPENAI_MAX_TOKENS:512}
+        embedding:
+          options:
+            deployment-name: ${AZURE_OPENAI_EMBEDDING_DEPLOYMENT:text-embedding-3-small}

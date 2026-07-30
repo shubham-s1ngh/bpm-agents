@@ -23,7 +23,8 @@ class CamundaDiagnosticReportServiceTest {
                     mock(ChatClient.Builder.class),
                     evidenceDigestService,
                     groundingValidator,
-                    mock(WorkflowKnowledgeVectorStoreService.class));
+                    mock(WorkflowKnowledgeVectorStoreService.class),
+                    mock(ChatRuntimeOptionsFactory.class));
 
     @Test
     void buildsStableDiagnosticContractWithoutLegacySections() {
