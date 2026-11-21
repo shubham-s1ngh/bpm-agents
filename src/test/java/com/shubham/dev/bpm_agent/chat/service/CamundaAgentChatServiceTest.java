@@ -30,6 +30,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 mock(CamundaToolDispatchService.class),
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         Optional<Long> extracted = service.extractRequestedProcessInstanceKey(
@@ -47,6 +48,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 mock(CamundaToolDispatchService.class),
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         Optional<Long> extracted = service.extractRequestedProcessInstanceKey(
@@ -67,6 +69,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 toolDispatchService,
                 reportService,
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         when(diagnosticTools.resolveIncidentsByProcessInstance("2251799813950818"))
@@ -99,6 +102,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 mock(CamundaToolDispatchService.class),
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         String response = service.handleSearchProcessInstancesResult(
@@ -141,6 +145,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 mock(CamundaToolDispatchService.class),
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         String response = service.handlePrompt("retry incidents for ORD-55421 and INV-99211");
@@ -170,6 +175,7 @@ class CamundaAgentChatServiceTest {
                 strategyRegistry,
                 toolDispatchService,
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         when(strategyRegistry.getStrategyForPrompt("retry incidents for ORD-55421 and ORD-55422"))
@@ -264,6 +270,7 @@ class CamundaAgentChatServiceTest {
                 strategyRegistry,
                 toolDispatchService,
                 mock(CamundaDiagnosticReportService.class),
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         when(strategyRegistry.getStrategyForPrompt("retry incidents for ORD-55431 and ORD-55432"))
@@ -325,6 +332,7 @@ class CamundaAgentChatServiceTest {
                 mock(WorkflowStrategyRegistry.class),
                 toolDispatchService,
                 reportService,
+                mock(ChatRuntimeOptionsFactory.class),
                 new ObjectMapper());
 
         Map<String, Object> blockedDiagnostic = Map.of(

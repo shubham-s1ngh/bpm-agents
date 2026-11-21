@@ -10,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -35,17 +34,20 @@ public class CamundaDiagnosticReportService {
     private final CamundaEvidenceDigestService evidenceDigestService;
     private final CamundaReportGroundingValidator groundingValidator;
     private final WorkflowKnowledgeVectorStoreService workflowKnowledgeVectorStoreService;
+    private final ChatRuntimeOptionsFactory chatRuntimeOptionsFactory;
 
     public CamundaDiagnosticReportService(ObjectMapper objectMapper,
                                           ChatClient.Builder chatClientBuilder,
                                           CamundaEvidenceDigestService evidenceDigestService,
                                           CamundaReportGroundingValidator groundingValidator,
-                                          WorkflowKnowledgeVectorStoreService workflowKnowledgeVectorStoreService) {
+                                          WorkflowKnowledgeVectorStoreService workflowKnowledgeVectorStoreService,
+                                          ChatRuntimeOptionsFactory chatRuntimeOptionsFactory) {
         this.objectMapper = objectMapper;
         this.chatClientBuilder = chatClientBuilder;
         this.evidenceDigestService = evidenceDigestService;
         this.groundingValidator = groundingValidator;
         this.workflowKnowledgeVectorStoreService = workflowKnowledgeVectorStoreService;
+        this.chatRuntimeOptionsFactory = chatRuntimeOptionsFactory;
     }
 
     public String generateReport(String conversationId,
@@ -118,12 +120,14 @@ public class CamundaDiagnosticReportService {
 
         String generatedReport = "";
         for (int attempt = 1; attempt <= 2; attempt++) {
-            generatedReport = stripMarkdownFence(reportChatClient.prompt()
+            var promptSpec = reportChatClient.prompt()
                     .user(reportPrompt)
-                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId + "-report"))
-                    .options(OllamaChatOptions.builder().format((String) null).build())
-                    .call()
-                    .content());
+                    .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, conversationId + "-report"));
+            if (chatRuntimeOptionsFactory.textModeOptions().isPresent()) {
+                promptSpec = promptSpec.options(chatRuntimeOptionsFactory.textModeOptions().get());
+            }
+
+            generatedReport = stripMarkdownFence(promptSpec.call().content());
 
             List<String> validationErrors = groundingValidator.validate(generatedReport, snapshot);
             if (validationErrors.isEmpty()) {

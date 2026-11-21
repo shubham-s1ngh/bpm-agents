@@ -1,6 +1,7 @@
 package com.shubham.dev.bpm_agent.strategy.admin;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shubham.dev.bpm_agent.chat.service.ChatRuntimeOptionsFactory;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 
@@ -13,7 +14,10 @@ import static org.mockito.Mockito.mock;
 class BpmnIncidentRuleSuggestionServiceTest {
 
     private final BpmnIncidentRuleSuggestionService service =
-            new BpmnIncidentRuleSuggestionService(mock(ChatClient.Builder.class), new ObjectMapper());
+            new BpmnIncidentRuleSuggestionService(
+                    mock(ChatClient.Builder.class),
+                    mock(ChatRuntimeOptionsFactory.class),
+                    new ObjectMapper());
 
     @Test
     void extractsServiceTaskAndCallActivityCandidatesFromBpmnXml() {

@@ -1,0 +1,8 @@
+spring:
+  config:
+    activate:
+      on-profile: ollama
+  ai:
+    model:
+      chat: ollama
+      embedding: ollama

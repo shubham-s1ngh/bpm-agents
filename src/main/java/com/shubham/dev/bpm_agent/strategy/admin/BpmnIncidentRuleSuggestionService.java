@@ -2,10 +2,10 @@ package com.shubham.dev.bpm_agent.strategy.admin;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.shubham.dev.bpm_agent.chat.service.ChatRuntimeOptionsFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.ollama.api.OllamaChatOptions;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
@@ -36,10 +36,14 @@ public class BpmnIncidentRuleSuggestionService {
     private static final Set<String> CANDIDATE_TYPES = Set.of("serviceTask", "businessRuleTask", "sendTask", "callActivity");
 
     private final ChatClient.Builder chatClientBuilder;
+    private final ChatRuntimeOptionsFactory chatRuntimeOptionsFactory;
     private final ObjectMapper objectMapper;
 
-    public BpmnIncidentRuleSuggestionService(ChatClient.Builder chatClientBuilder, ObjectMapper objectMapper) {
+    public BpmnIncidentRuleSuggestionService(ChatClient.Builder chatClientBuilder,
+                                             ChatRuntimeOptionsFactory chatRuntimeOptionsFactory,
+                                             ObjectMapper objectMapper) {
         this.chatClientBuilder = chatClientBuilder;
+        this.chatRuntimeOptionsFactory = chatRuntimeOptionsFactory;
         this.objectMapper = objectMapper;
     }
 
@@ -179,7 +183,7 @@ public class BpmnIncidentRuleSuggestionService {
             String prompt = buildSuggestionPrompt(processSummaries, consultantNotes);
             String response = chatClient.prompt()
                     .user(prompt)
-                    .options(OllamaChatOptions.builder().format("json").build())
+                    .options(chatRuntimeOptionsFactory.jsonModeOptions())
                     .call()
                     .content();
 

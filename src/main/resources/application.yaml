@@ -25,9 +25,17 @@ spring:
     # This branch restored the migration files after source drift; keep startup tolerant of local checksum history.
     validate-on-migrate: false
   ai:
+    # Default local wiring keeps the existing OpenAI-compatible chat path and
+    # Ollama embeddings. Switch to `ollama` or `azure-openai` profiles to move
+    # both chat and embeddings onto a single provider.
     model:
       chat: openai
       embedding: ollama
+      image: none
+      audio:
+        transcription: none
+        speech: none
+      moderation: none
     openai:
       api-key: ${OPENAI_API_KEY:not-needed}
       base-url: ${GPT4ALL_BASE_URL:http://localhost:11434}
@@ -105,7 +113,7 @@ app:
     # Workers call the local mock APIs to simulate retryable and non-retryable connector failures.
     base-url: ${APP_MOCK_SERVICES_BASE_URL:http://localhost:8081}
     # Disable this for a stable happy-path run with no random transient failures.
-    random-5xx-enabled: ${APP_MOCK_SERVICES_RANDOM_5XX_ENABLED:false}
+    random-5xx-enabled: ${APP_MOCK_SERVICES_RANDOM_5XX_ENABLED:true}
     random-5xx-one-out-of: ${APP_MOCK_SERVICES_RANDOM_5XX_ONE_OUT_OF:1}
     # When true, worker-side HTTP 5xx failures are converted into immediate incidents by setting retries to 0.
     immediate-incident-on-5xx: ${APP_MOCK_SERVICES_IMMEDIATE_INCIDENT_ON_5XX:true}
